@@ -380,7 +380,7 @@ export function DashboardProyectos() {
       {error && <ErrorBanner message={error} />}
 
       {/* KPIs */}
-      <div className="grid grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 mb-6">
         {loading || !data ? (
           <KpiSkeletonGrid count={5} />
         ) : data.mode === 'monthly' ? (

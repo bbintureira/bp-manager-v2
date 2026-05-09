@@ -53,7 +53,9 @@ export function KpiCard({
 
       <div
         className={cn(
-          'text-4xl font-semibold leading-[1.1] tracking-tight tabular-nums mb-1.5',
+          // Fluid value size: shrinks gracefully on narrow viewports so
+          // long currency strings don't overflow tight KPI cards.
+          'text-2xl md:text-3xl xl:text-4xl font-semibold leading-[1.1] tracking-tight tabular-nums mb-1.5',
           mono && 'font-mono'
         )}
       >

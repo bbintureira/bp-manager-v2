@@ -198,7 +198,7 @@ export function BPDetailModal({
         <DialogBody className="flex-1 overflow-y-auto">
           {loading || !data ? (
             <>
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <KpiSkeletonGrid count={4} />
               </div>
               <div className="mt-4">
@@ -620,7 +620,7 @@ function RentabilidadMensual({
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard
           label="Sueldo"
           value={
@@ -741,7 +741,7 @@ function RentabilidadAnual({ rentaYear }: { rentaYear: BPRentabilidadYearRow }) 
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard
           label="Ingreso año"
           value={totalIngreso > 0 ? formatCurrency(totalIngreso) : '—'}
