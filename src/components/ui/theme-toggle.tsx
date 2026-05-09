@@ -7,10 +7,10 @@ const STORAGE_KEY = 'bp-theme'
 type Theme = 'dark' | 'light'
 
 function readInitialTheme(): Theme {
-  if (typeof window === 'undefined') return 'dark'
+  if (typeof window === 'undefined') return 'light'
   const saved = window.localStorage.getItem(STORAGE_KEY)
   if (saved === 'dark' || saved === 'light') return saved
-  return 'dark'
+  return 'light'
 }
 
 export interface ThemeToggleProps {
@@ -19,7 +19,7 @@ export interface ThemeToggleProps {
 
 /**
  * Toggles `.dark` on <html> and persists the choice in localStorage under
- * `bp-theme`. The default is dark; the choice is applied synchronously
+ * `bp-theme`. The default is light; the choice is applied synchronously
  * by an inline script in index.html to avoid FOUC.
  */
 export function ThemeToggle({ className }: ThemeToggleProps) {

@@ -16,6 +16,13 @@ export interface KpiCardProps {
   className?: string
 }
 
+/** If value is a primitive, expose its full text on hover via the native
+ *  title attribute — useful when the cell truncates with ellipsis. */
+function valueTitle(v: ReactNode): string | undefined {
+  if (typeof v === 'string' || typeof v === 'number') return String(v)
+  return undefined
+}
+
 /**
  * Big metric card for the dashboard. Has a subtle gradient line on top
  * (`linear-gradient(90deg, transparent, var(--border-strong), transparent)`)
@@ -52,10 +59,14 @@ export function KpiCard({
       </div>
 
       <div
+        title={valueTitle(value)}
         className={cn(
-          // Fluid value size: shrinks gracefully on narrow viewports so
-          // long currency strings don't overflow tight KPI cards.
-          'text-2xl md:text-3xl xl:text-4xl font-semibold leading-[1.1] tracking-tight tabular-nums mb-1.5',
+          // Fluid font-size scales with viewport width between 22px and
+          // 40px. Combined with `truncate` + `title`, long currency
+          // strings shrink first, then fall back to ellipsis with the
+          // full value visible on hover.
+          'font-semibold leading-[1.1] tracking-tight tabular-nums mb-1.5',
+          'text-[clamp(22px,_2.2vw_+_8px,_40px)] truncate',
           mono && 'font-mono'
         )}
       >
