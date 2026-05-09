@@ -71,7 +71,7 @@ export function KpiCard({
           // strings shrink first, then fall back to ellipsis with the
           // full value visible on hover.
           'font-semibold leading-[1.1] tracking-tight tabular-nums mb-1.5',
-          'text-[clamp(22px,_2.2vw_+_8px,_40px)] truncate',
+          'text-[clamp(20px,_1.6vw_+_6px,_36px)] truncate',
           mono && 'font-mono'
         )}
       >

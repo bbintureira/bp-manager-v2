@@ -46,18 +46,11 @@ const config: Config = {
         },
       },
       fontSize: {
-        // Scaled +33% globally (15→20 ratio) for "readable from a few
-        // steps away" comfort. Line-heights scaled in lockstep.
-        '2xs': ['15px', '19px'],
-        xs: ['16px', '21px'],
-        sm: ['17px', '24px'],
-        base: ['19px', '28px'],
-        md: ['20px', '29px'],
-        lg: ['21px', '32px'],
-        xl: ['24px', '35px'],
-        '2xl': ['29px', '37px'],
-        '3xl': ['35px', '43px'],
-        '4xl': ['40px', '45px'],
+        // Default Tailwind scale for everything except the two custom keys
+        // we use across the codebase: `2xs` for tiny uppercase labels, and
+        // `md` (which Tailwind doesn't ship) for body+ sizing slots.
+        '2xs': ['11px', '14px'],
+        md: ['16px', '24px'],
       },
       letterSpacing: {
         title: '-0.02em',
