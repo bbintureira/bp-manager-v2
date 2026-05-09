@@ -44,6 +44,8 @@ import { StatusBadge, type StatusVariant } from '@/components/ui/status-badge'
 import { UtilizationBar } from '@/components/ui/utilization-bar'
 import { ViewToggle, type ViewMode } from '@/components/ui/view-toggle'
 import {
+  formatCompactCurrency,
+  formatCompactHours,
   formatCurrency,
   formatHours,
   formatNumber,
@@ -387,12 +389,14 @@ export function DashboardProyectos() {
           <>
             <KpiCard
               label="Ingresos del mes"
-              value={formatCurrency(data.revenue)}
+              value={formatCompactCurrency(data.revenue)}
+              fullValue={formatCurrency(data.revenue)}
               meta={`${monthlyActive.length} proyectos activos`}
             />
             <KpiCard
               label="Costo de BPs"
-              value={formatCurrency(data.costs)}
+              value={formatCompactCurrency(data.costs)}
+              fullValue={formatCurrency(data.costs)}
               meta={`${data.snapshot.brandPartners.length} BPs en plantilla`}
             />
             <RentabilidadKpi data={data.rentabilidad} scope="mes" />
@@ -401,26 +405,29 @@ export function DashboardProyectos() {
               value={formatPercent(data.marginPercent)}
               meta={
                 data.revenue > 0
-                  ? `${formatCurrency(data.revenue - data.costs)} netos`
+                  ? `${formatCompactCurrency(data.revenue - data.costs)} netos`
                   : 'sin datos'
               }
             />
             <KpiCard
               label="Horas idle"
-              value={formatHours(data.idleHours)}
-              meta={`sobre ${formatHours(data.snapshot.brandPartners.length * HOURS_PER_MONTH)} disponibles`}
+              value={formatCompactHours(data.idleHours)}
+              fullValue={formatHours(data.idleHours)}
+              meta={`sobre ${formatCompactHours(data.snapshot.brandPartners.length * HOURS_PER_MONTH)} disponibles`}
             />
           </>
         ) : (
           <>
             <KpiCard
               label="Ingresos del año"
-              value={formatCurrency(data.kpis.revenue)}
+              value={formatCompactCurrency(data.kpis.revenue)}
+              fullValue={formatCurrency(data.kpis.revenue)}
               meta={`${data.kpis.activeProjects} proyectos con horas`}
             />
             <KpiCard
               label="Costo de BPs (año)"
-              value={formatCurrency(data.kpis.costs)}
+              value={formatCompactCurrency(data.kpis.costs)}
+              fullValue={formatCurrency(data.kpis.costs)}
               meta={`${data.snapshot.brandPartners.length} BPs en plantilla`}
             />
             <RentabilidadKpi data={data.rentabilidad} scope="año" />
@@ -429,13 +436,14 @@ export function DashboardProyectos() {
               value={formatPercent(data.kpis.marginPercent)}
               meta={
                 data.kpis.revenue > 0
-                  ? `${formatCurrency(data.kpis.revenue - data.kpis.costs)} netos`
+                  ? `${formatCompactCurrency(data.kpis.revenue - data.kpis.costs)} netos`
                   : 'sin datos'
               }
             />
             <KpiCard
               label="Horas idle (año)"
-              value={formatHours(data.kpis.idleHours)}
+              value={formatCompactHours(data.kpis.idleHours)}
+              fullValue={formatHours(data.kpis.idleHours)}
               meta="suma de 12 meses"
             />
           </>
@@ -819,7 +827,8 @@ function RentabilidadKpi({
   const positive = data.total > 0
   const negative = data.total < 0
   const sign = positive ? '+' : negative ? '−' : ''
-  const value = `${sign}${formatCurrency(Math.abs(data.total))}`
+  const display = `${sign}${formatCompactCurrency(Math.abs(data.total))}`
+  const fullValue = `${sign}${formatCurrency(Math.abs(data.total))}`
   const color =
     data.totalHoras === 0
       ? undefined
@@ -836,11 +845,12 @@ function RentabilidadKpi({
   return (
     <KpiCard
       label={label}
+      fullValue={fullValue}
       value={
         color ? (
-          <span style={{ color }}>{value}</span>
+          <span style={{ color }}>{display}</span>
         ) : (
-          value
+          display
         )
       }
       meta={meta}

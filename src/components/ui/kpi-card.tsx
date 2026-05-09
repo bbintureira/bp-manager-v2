@@ -13,6 +13,10 @@ export interface KpiCardProps {
   meta?: ReactNode
   /** Render value with monospace font (good for raw numbers/codes). */
   mono?: boolean
+  /** Full/precise value to expose on hover (native browser tooltip).
+   *  Use this when `value` is a compact form like "$252,5M" so the
+   *  reader can still pull up the exact "$252.553.853" via tooltip. */
+  fullValue?: string
   className?: string
 }
 
@@ -34,6 +38,7 @@ export function KpiCard({
   delta,
   meta,
   mono,
+  fullValue,
   className,
 }: KpiCardProps) {
   return (
@@ -59,7 +64,7 @@ export function KpiCard({
       </div>
 
       <div
-        title={valueTitle(value)}
+        title={fullValue ?? valueTitle(value)}
         className={cn(
           // Fluid font-size scales with viewport width between 22px and
           // 40px. Combined with `truncate` + `title`, long currency

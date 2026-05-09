@@ -18,8 +18,19 @@
     <script>
       // Apply theme synchronously to avoid flash. Default: light (dark mode
       // had visual bugs on the new BP dashboards).
+      //
+      // One-time migration: earlier builds defaulted to dark and persisted
+      // 'dark' to localStorage on the very first load — even for users who
+      // never explicitly toggled. We reset that here so existing users
+      // also pick up the new light default. Anyone who consciously toggles
+      // dark after the migration keeps it (the migration flag stays set).
       (function () {
         try {
+          var MIGRATED = 'bp-theme-migrated-v2'
+          if (!localStorage.getItem(MIGRATED)) {
+            localStorage.removeItem('bp-theme')
+            localStorage.setItem(MIGRATED, '1')
+          }
           var t = localStorage.getItem('bp-theme') || 'light'
           if (t === 'dark') document.documentElement.classList.add('dark')
         } catch (e) {

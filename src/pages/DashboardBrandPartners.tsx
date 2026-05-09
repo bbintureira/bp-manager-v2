@@ -23,6 +23,8 @@ import { Section } from '@/components/ui/section'
 import { Select } from '@/components/ui/select'
 import { ViewToggle, type ViewMode } from '@/components/ui/view-toggle'
 import {
+  formatCompactCurrency,
+  formatCompactHours,
   formatCurrency,
   formatHours,
   formatNumber,
@@ -413,12 +415,14 @@ export function DashboardBrandPartners() {
             <KpiCard label="Total BPs" value={formatNumber(kpiStats.total, 0)} />
             <KpiCard
               label="Horas asignadas"
-              value={formatHours(Math.round(kpiStats.totalAsignadas))}
-              meta={`de ${formatHours(Math.round(kpiStats.totalContratadas))} contratadas`}
+              value={formatCompactHours(Math.round(kpiStats.totalAsignadas))}
+              fullValue={formatHours(Math.round(kpiStats.totalAsignadas))}
+              meta={`de ${formatCompactHours(Math.round(kpiStats.totalContratadas))} contratadas`}
             />
             <KpiCard
               label="Horas libres"
-              value={formatHours(Math.round(kpiStats.totalLibres))}
+              value={formatCompactHours(Math.round(kpiStats.totalLibres))}
+              fullValue={formatHours(Math.round(kpiStats.totalLibres))}
             />
             <KpiCard
               label="% ocupación"
@@ -432,16 +436,26 @@ export function DashboardBrandPartners() {
               label="Ingreso cotizado"
               value={
                 kpiStats.totalIngreso > 0
-                  ? formatCurrency(kpiStats.totalIngreso)
+                  ? formatCompactCurrency(kpiStats.totalIngreso)
                   : '—'
+              }
+              fullValue={
+                kpiStats.totalIngreso > 0
+                  ? formatCurrency(kpiStats.totalIngreso)
+                  : undefined
               }
             />
             <KpiCard
               label="Margen total"
               value={
                 kpiStats.totalIngreso > 0
-                  ? formatCurrency(kpiStats.totalMargen)
+                  ? formatCompactCurrency(kpiStats.totalMargen)
                   : '—'
+              }
+              fullValue={
+                kpiStats.totalIngreso > 0
+                  ? formatCurrency(kpiStats.totalMargen)
+                  : undefined
               }
               meta={
                 kpiStats.totalIngreso > 0
@@ -896,11 +910,3 @@ function rentabilidadAnnualColumns(
   ]
 }
 
-/** "$1.2M" / "$45K" — short number for narrow month columns. */
-function formatCompactCurrency(value: number): string {
-  const abs = Math.abs(value)
-  const sign = value < 0 ? '-' : ''
-  if (abs >= 1_000_000) return `${sign}$${formatNumber(abs / 1_000_000, 1)}M`
-  if (abs >= 1_000) return `${sign}$${formatNumber(abs / 1_000, 1)}K`
-  return formatCurrency(value, 0)
-}
