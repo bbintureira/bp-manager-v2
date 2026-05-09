@@ -205,25 +205,57 @@ export function DashboardBrandPartners() {
   const kpiStats = useMemo(() => {
     if (tab === 'horas') {
       const monthly = view === 'monthly'
-      const totalContratadas = monthly
-        ? filteredHoras.reduce((s, r) => s + r.horasContratadas, 0)
-        : filteredHorasAnnual.reduce((s, r) => s + r.totalContratadas, 0)
-      const totalAsignadas = monthly
-        ? filteredHoras.reduce((s, r) => s + r.horasAsignadas, 0)
-        : filteredHorasAnnual.reduce((s, r) => s + r.totalAsignadas, 0)
-      const totalLibres = monthly
-        ? filteredHoras.reduce((s, r) => s + r.horasLibres, 0)
-        : filteredHorasAnnual.reduce((s, r) => s + r.totalLibres, 0)
-      const total = monthly ? filteredHoras.length : filteredHorasAnnual.length
+      const rows = monthly ? filteredHoras : filteredHorasAnnual
+      // Active count is computed from the filtered set so it respects
+      // grouper/search filters but ignores the activos/inactivos toggle:
+      // "Total BPs activos" should always count actives, regardless of
+      // whether the user is currently viewing the inactive list.
+      const activos = rows.filter((r) => r.bp.activo !== false).length
+      if (monthly) {
+        const totalContratadas = filteredHoras.reduce(
+          (s, r) => s + r.horasContratadas,
+          0
+        )
+        const totalAsignadas = filteredHoras.reduce(
+          (s, r) => s + r.horasAsignadas,
+          0
+        )
+        const totalLibres = filteredHoras.reduce(
+          (s, r) => s + r.horasLibres,
+          0
+        )
+        const ocupacion =
+          totalContratadas > 0 ? (totalAsignadas / totalContratadas) * 100 : 0
+        return {
+          kind: 'horas-mes' as const,
+          activos,
+          ocupacion,
+          totalLibres,
+        }
+      }
+      const totalContratadas = filteredHorasAnnual.reduce(
+        (s, r) => s + r.totalContratadas,
+        0
+      )
+      const totalAsignadas = filteredHorasAnnual.reduce(
+        (s, r) => s + r.totalAsignadas,
+        0
+      )
+      const totalLibres = filteredHorasAnnual.reduce(
+        (s, r) => s + r.totalLibres,
+        0
+      )
       const ocupacion =
         totalContratadas > 0 ? (totalAsignadas / totalContratadas) * 100 : 0
+      // Average libres per calendar month across the team. Year has 12
+      // months — fixed denominator so the value stays comparable across
+      // teams of different sizes.
+      const libresPromedioMes = totalLibres / 12
       return {
-        kind: 'horas' as const,
-        total,
-        totalContratadas,
-        totalAsignadas,
-        totalLibres,
+        kind: 'horas-año' as const,
+        activos,
         ocupacion,
+        libresPromedioMes,
       }
     }
     const monthly = view === 'monthly'
@@ -407,26 +439,52 @@ export function DashboardBrandPartners() {
 
       {error && <ErrorBanner message={error} />}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      <div
+        className={cn(
+          'grid gap-3 mb-6',
+          // Horas tab → 3 cards. Rentabilidad → 4. Both collapse to 2 on
+          // narrow viewports.
+          tab === 'horas'
+            ? 'grid-cols-2 lg:grid-cols-3'
+            : 'grid-cols-2 lg:grid-cols-4'
+        )}
+      >
         {loading || !snapshot ? (
-          <KpiSkeletonGrid />
-        ) : kpiStats.kind === 'horas' ? (
+          <KpiSkeletonGrid count={tab === 'horas' ? 3 : 4} />
+        ) : kpiStats.kind === 'horas-mes' ? (
           <>
-            <KpiCard label="Total BPs" value={formatNumber(kpiStats.total, 0)} />
             <KpiCard
-              label="Horas asignadas"
-              value={formatCompactHours(Math.round(kpiStats.totalAsignadas))}
-              fullValue={formatHours(Math.round(kpiStats.totalAsignadas))}
-              meta={`de ${formatCompactHours(Math.round(kpiStats.totalContratadas))} contratadas`}
+              label="Total BPs activos"
+              value={formatNumber(kpiStats.activos, 0)}
+            />
+            <KpiCard
+              label="% ocupación promedio"
+              value={formatPercent(kpiStats.ocupacion)}
+              meta="del mes"
             />
             <KpiCard
               label="Horas libres"
               value={formatCompactHours(Math.round(kpiStats.totalLibres))}
               fullValue={formatHours(Math.round(kpiStats.totalLibres))}
+              meta="totales del mes"
+            />
+          </>
+        ) : kpiStats.kind === 'horas-año' ? (
+          <>
+            <KpiCard
+              label="Total BPs activos"
+              value={formatNumber(kpiStats.activos, 0)}
             />
             <KpiCard
-              label="% ocupación"
+              label="% ocupación promedio"
               value={formatPercent(kpiStats.ocupacion)}
+              meta="anualizado"
+            />
+            <KpiCard
+              label="Horas libres prom."
+              value={formatCompactHours(Math.round(kpiStats.libresPromedioMes))}
+              fullValue={formatHours(Math.round(kpiStats.libresPromedioMes))}
+              meta="por mes"
             />
           </>
         ) : (
