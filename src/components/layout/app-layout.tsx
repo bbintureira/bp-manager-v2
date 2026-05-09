@@ -42,8 +42,8 @@ export function AppLayout({
     <div className="flex min-h-screen">
       <div
         className={cn(
-          'shrink-0 transition-[width] duration-200 ease-out',
-          collapsed ? 'w-14' : 'w-60'
+          'shrink-0 transition-[width] duration-150 ease-out',
+          collapsed ? 'w-12' : 'w-60'
         )}
       >
         <Sidebar

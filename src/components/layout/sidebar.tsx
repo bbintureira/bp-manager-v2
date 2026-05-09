@@ -34,7 +34,7 @@ const admin: NavItem[] = [
 ]
 
 export interface SidebarProps {
-  /** When true, only icons are shown and the rail collapses to ~56px. */
+  /** When true, only icons are shown and the rail collapses to ~48px. */
   collapsed: boolean
   onToggleCollapsed: () => void
 }
@@ -80,40 +80,51 @@ function Header({
   collapsed: boolean
   onToggle: () => void
 }) {
+  if (collapsed) {
+    return (
+      <div className="flex flex-col items-center gap-1 mb-2 py-1">
+        <LogoMark />
+        <ToggleButton collapsed onToggle={onToggle} />
+      </div>
+    )
+  }
   return (
-    <div
+    <div className="flex items-center justify-between mb-2 px-2 py-2">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <LogoMark />
+        <span className="font-semibold text-md tracking-snug truncate">
+          BP Manager
+        </span>
+      </div>
+      <ToggleButton collapsed={false} onToggle={onToggle} />
+    </div>
+  )
+}
+
+function ToggleButton({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean
+  onToggle: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={collapsed ? 'Expandir sidebar' : 'Colapsar sidebar'}
+      title={collapsed ? 'Expandir' : 'Colapsar'}
       className={cn(
-        'flex items-center mb-2',
-        collapsed ? 'justify-center px-1 py-1.5' : 'justify-between px-2 py-2'
+        'grid place-items-center w-7 h-7 rounded-md text-tertiary',
+        'hover:text-primary hover:bg-hover transition-colors'
       )}
     >
-      {!collapsed && (
-        <div className="flex items-center gap-2.5 min-w-0">
-          <LogoMark />
-          <span className="font-semibold text-md tracking-snug truncate">
-            BP Manager
-          </span>
-        </div>
+      {collapsed ? (
+        <PanelLeftOpen className="w-4 h-4" />
+      ) : (
+        <PanelLeftClose className="w-4 h-4" />
       )}
-      {collapsed && <LogoMark />}
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-label={collapsed ? 'Expandir sidebar' : 'Colapsar sidebar'}
-        title={collapsed ? 'Expandir' : 'Colapsar'}
-        className={cn(
-          'grid place-items-center w-7 h-7 rounded-md text-tertiary',
-          'hover:text-primary hover:bg-hover transition-colors',
-          collapsed && 'mt-2'
-        )}
-      >
-        {collapsed ? (
-          <PanelLeftOpen className="w-4 h-4" />
-        ) : (
-          <PanelLeftClose className="w-4 h-4" />
-        )}
-      </button>
-    </div>
+    </button>
   )
 }
 

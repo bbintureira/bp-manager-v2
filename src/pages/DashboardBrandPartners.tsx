@@ -200,96 +200,52 @@ export function DashboardBrandPartners() {
     [allRentabilidadAnnual, searchQuery, grouperFilter, activoFilter]
   )
 
-  // KPIs adapt to the active tab so they speak to whatever the user is
-  // looking at. All derive from the FILTERED tab rows.
+  // KPIs are tab-independent: the page-level cards always describe team
+  // utilization (BPs activos / % ocupación / horas libres). The
+  // Rentabilidad-specific metrics live inside the per-BP rows + detail
+  // modal, not at the global page header.
   const kpiStats = useMemo(() => {
-    if (tab === 'horas') {
-      const monthly = view === 'monthly'
-      const rows = monthly ? filteredHoras : filteredHorasAnnual
-      // Active count is computed from the filtered set so it respects
-      // grouper/search filters but ignores the activos/inactivos toggle:
-      // "Total BPs activos" should always count actives, regardless of
-      // whether the user is currently viewing the inactive list.
-      const activos = rows.filter((r) => r.bp.activo !== false).length
-      if (monthly) {
-        const totalContratadas = filteredHoras.reduce(
-          (s, r) => s + r.horasContratadas,
-          0
-        )
-        const totalAsignadas = filteredHoras.reduce(
-          (s, r) => s + r.horasAsignadas,
-          0
-        )
-        const totalLibres = filteredHoras.reduce(
-          (s, r) => s + r.horasLibres,
-          0
-        )
-        const ocupacion =
-          totalContratadas > 0 ? (totalAsignadas / totalContratadas) * 100 : 0
-        return {
-          kind: 'horas-mes' as const,
-          activos,
-          ocupacion,
-          totalLibres,
-        }
-      }
-      const totalContratadas = filteredHorasAnnual.reduce(
-        (s, r) => s + r.totalContratadas,
+    const monthly = view === 'monthly'
+    const rows = monthly ? filteredHoras : filteredHorasAnnual
+    // Active count is computed from the filtered set so it respects
+    // grouper/search filters but ignores the activos/inactivos toggle:
+    // "Total BPs activos" should always count actives, regardless of
+    // whether the user is currently viewing the inactive list.
+    const activos = rows.filter((r) => r.bp.activo !== false).length
+
+    if (monthly) {
+      const totalContratadas = filteredHoras.reduce(
+        (s, r) => s + r.horasContratadas,
         0
       )
-      const totalAsignadas = filteredHorasAnnual.reduce(
-        (s, r) => s + r.totalAsignadas,
+      const totalAsignadas = filteredHoras.reduce(
+        (s, r) => s + r.horasAsignadas,
         0
       )
-      const totalLibres = filteredHorasAnnual.reduce(
-        (s, r) => s + r.totalLibres,
-        0
-      )
+      const totalLibres = filteredHoras.reduce((s, r) => s + r.horasLibres, 0)
       const ocupacion =
         totalContratadas > 0 ? (totalAsignadas / totalContratadas) * 100 : 0
-      // Average libres per calendar month across the team. Year has 12
-      // months — fixed denominator so the value stays comparable across
-      // teams of different sizes.
-      const libresPromedioMes = totalLibres / 12
-      return {
-        kind: 'horas-año' as const,
-        activos,
-        ocupacion,
-        libresPromedioMes,
-      }
+      return { kind: 'mes' as const, activos, ocupacion, totalLibres }
     }
-    const monthly = view === 'monthly'
-    const totalIngreso = monthly
-      ? filteredRentabilidad.reduce((s, r) => s + r.ingresoCotizado, 0)
-      : filteredRentabilidadAnnual.reduce((s, r) => s + r.totalIngreso, 0)
-    const totalCosto = monthly
-      ? filteredRentabilidad.reduce((s, r) => s + r.costo, 0)
-      : filteredRentabilidadAnnual.reduce((s, r) => s + r.totalCosto, 0)
-    const total = monthly
-      ? filteredRentabilidad.length
-      : filteredRentabilidadAnnual.length
-    const enRojo = monthly
-      ? filteredRentabilidad.filter((r) => r.margen < 0).length
-      : filteredRentabilidadAnnual.filter((r) => r.totalMargen < 0).length
-    const totalMargen = totalIngreso - totalCosto
-    const margenPercent = totalIngreso > 0 ? (totalMargen / totalIngreso) * 100 : 0
-    return {
-      kind: 'rentabilidad' as const,
-      total,
-      totalIngreso,
-      totalCosto,
-      totalMargen,
-      margenPercent,
-      enRojo,
-    }
-  }, [
-    tab,
-    view,
-    filteredHoras,
-    filteredRentabilidad,
-    filteredHorasAnnual,
-    filteredRentabilidadAnnual,
-  ])
+    const totalContratadas = filteredHorasAnnual.reduce(
+      (s, r) => s + r.totalContratadas,
+      0
+    )
+    const totalAsignadas = filteredHorasAnnual.reduce(
+      (s, r) => s + r.totalAsignadas,
+      0
+    )
+    const totalLibres = filteredHorasAnnual.reduce(
+      (s, r) => s + r.totalLibres,
+      0
+    )
+    const ocupacion =
+      totalContratadas > 0 ? (totalAsignadas / totalContratadas) * 100 : 0
+    // Year has 12 months — fixed denominator so the metric is comparable
+    // across teams of different sizes.
+    const libresPromedioMes = totalLibres / 12
+    return { kind: 'año' as const, activos, ocupacion, libresPromedioMes }
+  }, [view, filteredHoras, filteredHorasAnnual])
 
   const topbarActions = (
     <div className="flex items-center gap-2">
@@ -439,19 +395,10 @@ export function DashboardBrandPartners() {
 
       {error && <ErrorBanner message={error} />}
 
-      <div
-        className={cn(
-          'grid gap-3 mb-6',
-          // Horas tab → 3 cards. Rentabilidad → 4. Both collapse to 2 on
-          // narrow viewports.
-          tab === 'horas'
-            ? 'grid-cols-2 lg:grid-cols-3'
-            : 'grid-cols-2 lg:grid-cols-4'
-        )}
-      >
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
         {loading || !snapshot ? (
-          <KpiSkeletonGrid count={tab === 'horas' ? 3 : 4} />
-        ) : kpiStats.kind === 'horas-mes' ? (
+          <KpiSkeletonGrid count={3} />
+        ) : kpiStats.kind === 'mes' ? (
           <>
             <KpiCard
               label="Total BPs activos"
@@ -463,13 +410,13 @@ export function DashboardBrandPartners() {
               meta="del mes"
             />
             <KpiCard
-              label="Horas libres"
+              label="Horas libres totales"
               value={formatCompactHours(Math.round(kpiStats.totalLibres))}
               fullValue={formatHours(Math.round(kpiStats.totalLibres))}
-              meta="totales del mes"
+              meta="del mes"
             />
           </>
-        ) : kpiStats.kind === 'horas-año' ? (
+        ) : (
           <>
             <KpiCard
               label="Total BPs activos"
@@ -485,46 +432,6 @@ export function DashboardBrandPartners() {
               value={formatCompactHours(Math.round(kpiStats.libresPromedioMes))}
               fullValue={formatHours(Math.round(kpiStats.libresPromedioMes))}
               meta="por mes"
-            />
-          </>
-        ) : (
-          <>
-            <KpiCard label="Total BPs" value={formatNumber(kpiStats.total, 0)} />
-            <KpiCard
-              label="Ingreso cotizado"
-              value={
-                kpiStats.totalIngreso > 0
-                  ? formatCompactCurrency(kpiStats.totalIngreso)
-                  : '—'
-              }
-              fullValue={
-                kpiStats.totalIngreso > 0
-                  ? formatCurrency(kpiStats.totalIngreso)
-                  : undefined
-              }
-            />
-            <KpiCard
-              label="Margen total"
-              value={
-                kpiStats.totalIngreso > 0
-                  ? formatCompactCurrency(kpiStats.totalMargen)
-                  : '—'
-              }
-              fullValue={
-                kpiStats.totalIngreso > 0
-                  ? formatCurrency(kpiStats.totalMargen)
-                  : undefined
-              }
-              meta={
-                kpiStats.totalIngreso > 0
-                  ? `${formatPercent(kpiStats.margenPercent)}`
-                  : 'sin ingresos cargados'
-              }
-            />
-            <KpiCard
-              label="BPs en rojo"
-              value={formatNumber(kpiStats.enRojo, 0)}
-              meta={`de ${kpiStats.total}`}
             />
           </>
         )}
