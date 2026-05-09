@@ -56,6 +56,10 @@
   }
 
   html {
+    /* Lock the root font-size so Tailwind's rem-based spacing (p-4, gap-2,
+     * etc.) is consistent regardless of the browser's user preference for
+     * larger/smaller text. The body font-size below is independent. */
+    font-size: 16px;
     background: var(--bg-base);
     color: var(--text-primary);
   }

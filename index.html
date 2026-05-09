@@ -6,8 +6,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- `display=swap` would render fallback first then swap to Geist when
+         loaded — that's the visible "size pop" some users report on slow
+         networks. `display=block` blocks paint up to ~3s waiting for Geist
+         and uses fallback only if it never arrives. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=block"
       rel="stylesheet"
     />
     <title>BP Manager</title>
