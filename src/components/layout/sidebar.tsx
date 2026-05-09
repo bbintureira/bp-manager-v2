@@ -1,11 +1,13 @@
 import { type ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutGrid,
-  Users,
   ClipboardList,
+  LayoutGrid,
   LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
   Shield,
+  Users,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ThemeToggle } from '../ui/theme-toggle'
@@ -31,7 +33,13 @@ const admin: NavItem[] = [
   { label: 'Administración', icon: <Shield className="w-4 h-4" />, to: '/admin/usuarios' },
 ]
 
-export function Sidebar() {
+export interface SidebarProps {
+  /** When true, only icons are shown and the rail collapses to ~56px. */
+  collapsed: boolean
+  onToggleCollapsed: () => void
+}
+
+export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
   const { isAdmin } = useAuth()
   return (
     // h-screen + sticky pin the sidebar to the viewport so the footer
@@ -41,41 +49,84 @@ export function Sidebar() {
     <aside
       role="navigation"
       aria-label="Navegación principal"
-      className="sticky top-0 h-screen bg-surface border-r border-border flex flex-col"
+      className="sticky top-0 h-screen bg-surface border-r border-border flex flex-col overflow-hidden"
     >
-      {/* Top: logo + nav, scrollable when needed.
-          `min-h-0` is required so the flex item can actually shrink and
-          let `overflow-y-auto` kick in (default min-height in flex is auto). */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-5 flex flex-col gap-1">
-        <Logo />
-        <NavSection label="Dashboards" items={dashboards} />
-        <NavSection label="Gestión" items={management} />
-        {isAdmin && <NavSection label="Admin" items={admin} />}
+      <div className="flex-1 min-h-0 overflow-y-auto px-2 py-3 flex flex-col gap-1">
+        <Header collapsed={collapsed} onToggle={onToggleCollapsed} />
+        <NavSection label="Dashboards" items={dashboards} collapsed={collapsed} />
+        <NavSection label="Gestión" items={management} collapsed={collapsed} />
+        {isAdmin && (
+          <NavSection label="Admin" items={admin} collapsed={collapsed} />
+        )}
       </div>
 
-      {/* Bottom: pinned. Has its own bg + border-top so the scroll area
-          tucks visually under it. */}
-      <div className="shrink-0 border-t border-border bg-surface px-3 py-3 flex flex-col gap-1">
-        <ThemeToggle />
-        <UserCard />
+      <div
+        className={cn(
+          'shrink-0 border-t border-border bg-surface flex flex-col gap-1',
+          collapsed ? 'px-1.5 py-2' : 'px-3 py-3'
+        )}
+      >
+        <ThemeToggle compact={collapsed} />
+        <UserCard collapsed={collapsed} />
       </div>
     </aside>
   )
 }
 
-function Logo() {
+function Header({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean
+  onToggle: () => void
+}) {
   return (
-    <div className="flex items-center gap-2.5 px-3 py-2 mb-3">
-      <div
-        className="grid place-items-center w-7 h-7 rounded-md text-white font-bold text-sm shadow-glow-accent"
-        style={{
-          background: 'linear-gradient(135deg, var(--accent), #1e40af)',
-        }}
-        aria-hidden
+    <div
+      className={cn(
+        'flex items-center mb-2',
+        collapsed ? 'justify-center px-1 py-1.5' : 'justify-between px-2 py-2'
+      )}
+    >
+      {!collapsed && (
+        <div className="flex items-center gap-2.5 min-w-0">
+          <LogoMark />
+          <span className="font-semibold text-md tracking-snug truncate">
+            BP Manager
+          </span>
+        </div>
+      )}
+      {collapsed && <LogoMark />}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={collapsed ? 'Expandir sidebar' : 'Colapsar sidebar'}
+        title={collapsed ? 'Expandir' : 'Colapsar'}
+        className={cn(
+          'grid place-items-center w-7 h-7 rounded-md text-tertiary',
+          'hover:text-primary hover:bg-hover transition-colors',
+          collapsed && 'mt-2'
+        )}
       >
-        B
-      </div>
-      <span className="font-semibold text-md tracking-snug">BP Manager</span>
+        {collapsed ? (
+          <PanelLeftOpen className="w-4 h-4" />
+        ) : (
+          <PanelLeftClose className="w-4 h-4" />
+        )}
+      </button>
+    </div>
+  )
+}
+
+function LogoMark() {
+  return (
+    <div
+      className="grid place-items-center w-7 h-7 rounded-md text-white font-bold text-sm shadow-glow-accent shrink-0"
+      style={{
+        background: 'linear-gradient(135deg, var(--accent), #1e40af)',
+      }}
+      aria-hidden
+    >
+      B
     </div>
   )
 }
@@ -83,9 +134,11 @@ function Logo() {
 function NavSection({
   label,
   items,
+  collapsed,
 }: {
   label: string
   items: NavItem[]
+  collapsed: boolean
 }) {
   // Reset the topbar search query on every nav click — covers the
   // "click the same nav item" case where pathname doesn't change so
@@ -93,9 +146,11 @@ function NavSection({
   const { setQuery } = useSearch()
   return (
     <div className="mt-3 first:mt-0">
-      <div className="text-2xs font-medium uppercase text-tertiary tracking-widest px-3 pb-1 pt-2">
-        {label}
-      </div>
+      {!collapsed && (
+        <div className="text-2xs font-medium uppercase text-tertiary tracking-widest px-3 pb-1 pt-2">
+          {label}
+        </div>
+      )}
       <ul className="flex flex-col gap-0.5">
         {items.map((item) => (
           <li key={item.to}>
@@ -103,9 +158,13 @@ function NavSection({
               to={item.to}
               end
               onClick={() => setQuery('')}
+              title={collapsed ? item.label : undefined}
               className={({ isActive }) =>
                 cn(
-                  'w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                  'w-full flex items-center rounded-md text-sm font-medium transition-colors',
+                  collapsed
+                    ? 'justify-center px-2 py-2'
+                    : 'gap-2.5 px-3 py-2',
                   isActive
                     ? 'bg-accent-soft text-accent'
                     : 'text-secondary hover:text-primary hover:bg-hover'
@@ -113,7 +172,7 @@ function NavSection({
               }
             >
               {item.icon}
-              <span>{item.label}</span>
+              {!collapsed && <span className="truncate">{item.label}</span>}
             </NavLink>
           </li>
         ))}
@@ -122,7 +181,7 @@ function NavSection({
   )
 }
 
-function UserCard() {
+function UserCard({ collapsed }: { collapsed: boolean }) {
   const { user, profile, logout } = useAuth()
   if (!user) return null
 
@@ -130,11 +189,25 @@ function UserCard() {
   const subtitle = profile?.nombre ? user.email ?? '' : ''
   const initial = displayName.charAt(0).toUpperCase() || 'U'
 
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={() => void logout()}
+        title={`${displayName} · cerrar sesión`}
+        aria-label="Cerrar sesión"
+        className="grid place-items-center w-9 h-9 mx-auto rounded-full bg-accent-soft text-accent text-2xs font-semibold hover:opacity-80 transition-opacity"
+      >
+        {initial}
+      </button>
+    )
+  }
+
   return (
     <div className="flex items-center gap-2 px-2 pt-1">
       <div
         aria-hidden
-        className="grid place-items-center w-7 h-7 rounded-full bg-accent-soft text-accent text-2xs font-semibold"
+        className="grid place-items-center w-7 h-7 rounded-full bg-accent-soft text-accent text-2xs font-semibold shrink-0"
       >
         {initial}
       </div>
@@ -155,7 +228,7 @@ function UserCard() {
         }}
         aria-label="Cerrar sesión"
         title="Cerrar sesión"
-        className="grid place-items-center w-7 h-7 rounded-md text-tertiary hover:text-primary hover:bg-hover transition-colors"
+        className="grid place-items-center w-7 h-7 rounded-md text-tertiary hover:text-primary hover:bg-hover transition-colors shrink-0"
       >
         <LogOut className="w-3.5 h-3.5" />
       </button>

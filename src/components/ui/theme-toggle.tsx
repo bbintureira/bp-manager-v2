@@ -15,6 +15,8 @@ function readInitialTheme(): Theme {
 
 export interface ThemeToggleProps {
   className?: string
+  /** When true, render as an icon-only button (sidebar collapsed mode). */
+  compact?: boolean
 }
 
 /**
@@ -22,7 +24,7 @@ export interface ThemeToggleProps {
  * `bp-theme`. The default is light; the choice is applied synchronously
  * by an inline script in index.html to avoid FOUC.
  */
-export function ThemeToggle({ className }: ThemeToggleProps) {
+export function ThemeToggle({ className, compact }: ThemeToggleProps) {
   const [theme, setTheme] = useState<Theme>(() => readInitialTheme())
 
   useEffect(() => {
@@ -38,6 +40,24 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
   const next: Theme = theme === 'dark' ? 'light' : 'dark'
   const Icon = theme === 'dark' ? Sun : Moon
   const nextLabel = next === 'dark' ? 'Modo oscuro' : 'Modo claro'
+
+  if (compact) {
+    return (
+      <button
+        type="button"
+        onClick={() => setTheme(next)}
+        aria-label={`Cambiar a ${nextLabel.toLowerCase()}`}
+        title={nextLabel}
+        className={cn(
+          'grid place-items-center w-9 h-9 mx-auto rounded-md',
+          'text-secondary hover:text-primary hover:bg-hover transition-colors',
+          className
+        )}
+      >
+        <Icon className="w-4 h-4" />
+      </button>
+    )
+  }
 
   return (
     <button
