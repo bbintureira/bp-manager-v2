@@ -426,6 +426,8 @@ export interface ProjectDetailFull {
   marginPercent: number
   /** One row per BP that worked on the project — hours by month + % share. */
   bps: ProjectBPBreakdown[]
+  /** Per-month booked honorarios for the project (length 12, indexed by mes). */
+  honorariosMensuales: { mes: number; honorarios: number }[]
 }
 
 export async function getProjectDetailFull(
@@ -441,6 +443,7 @@ export async function getProjectDetailFull(
       totalCost: 0,
       marginPercent: 0,
       bps: [],
+      honorariosMensuales: [],
     }
   }
   const bps = buildBPsForProject(
@@ -471,6 +474,7 @@ export async function getProjectDetailFull(
     totalCost,
     marginPercent,
     bps,
+    honorariosMensuales: detail.honorariosMensuales,
   }
 }
 

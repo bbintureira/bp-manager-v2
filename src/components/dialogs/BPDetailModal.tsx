@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Pencil } from 'lucide-react'
+import { Pencil } from 'lucide-react'
 import {
   Bar,
   BarChart,
@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/loading-states'
 import { chartTooltipStyle } from '@/components/ui/chart-card'
 import { getMonthLabel } from '@/components/ui/month-picker'
+import { MonthNav } from '@/components/ui/month-nav'
 import {
   formatCurrency,
   formatHours,
@@ -126,14 +127,20 @@ export function BPDetailModal({
     }
   }, [open, bp])
 
-  // Months in which this BP has at least one asignacion. Drives the bar
-  // chart's clickable bars and the Mensual prev/next steppers.
-  const activeMonthsHoras = useMemo(() => {
+  // Months in which this BP has at least one asignacion — computed per
+  // tab so Rentabilidad and Horas each respect their own data shape.
+  // Drives the clickable bars and the Mensual prev/next steppers.
+  const activeMonths = useMemo(() => {
     if (!data) return [] as number[]
+    if (activeTab === 'horas') {
+      return MONTHS.filter(
+        (_m, i) => data.horasYear.byMonth[i].horasAsignadas > 0
+      )
+    }
     return MONTHS.filter(
-      (_m, i) => data.horasYear.byMonth[i].horasAsignadas > 0
+      (_m, i) => data.rentaYear.byMonth[i].byProject.length > 0
     )
-  }, [data])
+  }, [data, activeTab])
 
   function jumpToMonth(m: number) {
     setInternalMes(m)
@@ -144,23 +151,20 @@ export function BPDetailModal({
   // internalMes isn't itself active (BP has no asignacion in it), step
   // to the closest active month in the requested direction.
   function stepMonth(dir: -1 | 1) {
-    if (activeMonthsHoras.length === 0) return
-    const sorted = activeMonthsHoras
+    if (activeMonths.length === 0) return
     if (dir === -1) {
-      const candidate = [...sorted].reverse().find((m) => m < internalMes)
+      const candidate = [...activeMonths].reverse().find((m) => m < internalMes)
       if (candidate !== undefined) setInternalMes(candidate)
     } else {
-      const candidate = sorted.find((m) => m > internalMes)
+      const candidate = activeMonths.find((m) => m > internalMes)
       if (candidate !== undefined) setInternalMes(candidate)
     }
   }
 
   const canPrev =
-    activeMonthsHoras.length > 0 &&
-    activeMonthsHoras.some((m) => m < internalMes)
+    activeMonths.length > 0 && activeMonths.some((m) => m < internalMes)
   const canNext =
-    activeMonthsHoras.length > 0 &&
-    activeMonthsHoras.some((m) => m > internalMes)
+    activeMonths.length > 0 && activeMonths.some((m) => m > internalMes)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -223,9 +227,16 @@ export function BPDetailModal({
             <RentabilidadMensual
               row={data.rentaYear.byMonth[internalMes - 1]}
               mes={internalMes}
+              onPrev={() => stepMonth(-1)}
+              onNext={() => stepMonth(1)}
+              canPrev={canPrev}
+              canNext={canNext}
             />
           ) : (
-            <RentabilidadAnual rentaYear={data.rentaYear} />
+            <RentabilidadAnual
+              rentaYear={data.rentaYear}
+              onMonthClick={jumpToMonth}
+            />
           )}
         </DialogBody>
 
@@ -297,39 +308,13 @@ function HorasMensual({
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-center gap-2">
-        <button
-          type="button"
-          aria-label="Mes anterior"
-          onClick={onPrev}
-          disabled={!canPrev}
-          className={cn(
-            'grid place-items-center w-8 h-8 rounded-md border border-border transition-colors',
-            canPrev
-              ? 'text-primary hover:bg-hover cursor-pointer'
-              : 'text-tertiary opacity-40 cursor-not-allowed'
-          )}
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-        <span className="text-sm font-medium min-w-[120px] text-center">
-          {getMonthLabel(mes)}
-        </span>
-        <button
-          type="button"
-          aria-label="Mes siguiente"
-          onClick={onNext}
-          disabled={!canNext}
-          className={cn(
-            'grid place-items-center w-8 h-8 rounded-md border border-border transition-colors',
-            canNext
-              ? 'text-primary hover:bg-hover cursor-pointer'
-              : 'text-tertiary opacity-40 cursor-not-allowed'
-          )}
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
-      </div>
+      <MonthNav
+        mes={mes}
+        onPrev={onPrev}
+        onNext={onNext}
+        canPrev={canPrev}
+        canNext={canNext}
+      />
 
       <CompactStats
         items={[
@@ -614,12 +599,27 @@ function MonthLibresTick(props: {
 function RentabilidadMensual({
   row,
   mes,
+  onPrev,
+  onNext,
+  canPrev,
+  canNext,
 }: {
   row: ReturnType<typeof bpRentabilidadMonthRow>
   mes: number
+  onPrev: () => void
+  onNext: () => void
+  canPrev: boolean
+  canNext: boolean
 }) {
   return (
     <div className="flex flex-col gap-4">
+      <MonthNav
+        mes={mes}
+        onPrev={onPrev}
+        onNext={onNext}
+        canPrev={canPrev}
+        canNext={canNext}
+      />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard
           label="Sueldo"
@@ -712,7 +712,13 @@ function RentabilidadMensual({
 // RENTABILIDAD — Anual
 // --------------------------------------------------------------------------
 
-function RentabilidadAnual({ rentaYear }: { rentaYear: BPRentabilidadYearRow }) {
+function RentabilidadAnual({
+  rentaYear,
+  onMonthClick,
+}: {
+  rentaYear: BPRentabilidadYearRow
+  onMonthClick?: (mes: number) => void
+}) {
   // Only include months where this BP has at least one asignacion.
   const activeMonths = useMemo(
     () =>
@@ -724,6 +730,7 @@ function RentabilidadAnual({ rentaYear }: { rentaYear: BPRentabilidadYearRow }) 
     const row = rentaYear.byMonth[m - 1]
     return {
       mes: getMonthLabel(m).slice(0, 3),
+      mesNum: m,
       margen: row.margen,
       ingreso: row.ingresoCotizado,
       costo: row.costo,
@@ -761,9 +768,16 @@ function RentabilidadAnual({ rentaYear }: { rentaYear: BPRentabilidadYearRow }) 
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold tracking-snug mb-3">
-          Margen mes a mes
-        </h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold tracking-snug">
+            Margen mes a mes
+          </h3>
+          {onMonthClick && (
+            <div className="text-2xs text-tertiary italic">
+              Clickeá un mes para ver el detalle
+            </div>
+          )}
+        </div>
         <div className="bg-base border border-border rounded-lg p-3">
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -789,7 +803,17 @@ function RentabilidadAnual({ rentaYear }: { rentaYear: BPRentabilidadYearRow }) 
                   formatter={(v: number) => formatCurrency(v)}
                   labelStyle={{ color: 'var(--text-primary)', fontWeight: 500 }}
                 />
-                <Bar dataKey="margen" name="Margen" radius={[4, 4, 0, 0]}>
+                <Bar
+                  dataKey="margen"
+                  name="Margen"
+                  radius={[4, 4, 0, 0]}
+                  cursor={onMonthClick ? 'pointer' : 'default'}
+                  onClick={(d: { mesNum?: number }) => {
+                    if (onMonthClick && typeof d.mesNum === 'number') {
+                      onMonthClick(d.mesNum)
+                    }
+                  }}
+                >
                   {data.map((d, i) => (
                     <Cell
                       key={i}

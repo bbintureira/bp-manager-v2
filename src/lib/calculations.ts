@@ -777,8 +777,12 @@ export interface ProjectBPBreakdown {
    *  Not a real income figure — compared to `costosAnuales` it answers
    *  "is the project profitable on this BP at the contracted rate?". */
   ingresosAnuales: number
+  /** Per-month reference ingreso (length 12): `horas_bp[m] × honorarios[m] / horas_req`. */
+  ingresosPorMes: number[]
   /** Yearly cost the BP represents on the project: Σ horas[mes] × sueldo[mes]/160. */
   costosAnuales: number
+  /** Per-month cost (length 12): `horas_bp[m] × sueldo_bp[m] / 160`. */
+  costosPorMes: number[]
   /** (ingresos - costos) / ingresos × 100. 0 if ingresos ≤ 0. */
   marginPercent: number
   /** Bucketed margin status: > 20% rentable, 0–20 neutral, ≤ 0 perdida. */
@@ -865,18 +869,17 @@ export function buildBPsForProject(
       sueldoByMes.set(s.mes, num(s.sueldo))
       totalSueldo += num(s.sueldo)
     }
-    let costosAnuales = 0
+    const costosPorMes = new Array(12).fill(0) as number[]
+    const ingresosPorMes = new Array(12).fill(0) as number[]
     for (let i = 0; i < 12; i++) {
       const horas = horasPorMes[i]
       const sueldo = sueldoByMes.get(i + 1) ?? 0
-      costosAnuales += horas * (sueldo / HOURS_PER_MONTH)
+      costosPorMes[i] = horas * (sueldo / HOURS_PER_MONTH)
+      // Ingreso de referencia per month: BP's hours × project rate for that month.
+      ingresosPorMes[i] = horas * ratePerHourProyectoPorMes[i]
     }
-    // Ingreso de referencia: BP's hours × project's contractual rate for
-    // each month. Tells you what the BP's hours are worth at project rate.
-    let ingresosAnuales = 0
-    for (let i = 0; i < 12; i++) {
-      ingresosAnuales += horasPorMes[i] * ratePerHourProyectoPorMes[i]
-    }
+    const costosAnuales = costosPorMes.reduce((s, x) => s + x, 0)
+    const ingresosAnuales = ingresosPorMes.reduce((s, x) => s + x, 0)
     const marginPercent =
       ingresosAnuales > 0
         ? ((ingresosAnuales - costosAnuales) / ingresosAnuales) * 100
@@ -896,7 +899,9 @@ export function buildBPsForProject(
       ratePerHourProyecto,
       ratePerHourBpAvg,
       ingresosAnuales,
+      ingresosPorMes,
       costosAnuales,
+      costosPorMes,
       marginPercent,
       estado,
     })

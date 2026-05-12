@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Pencil } from 'lucide-react'
 import {
   Bar,
@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/loading-states'
 import { chartTooltipStyle } from '@/components/ui/chart-card'
 import { getMonthLabel } from '@/components/ui/month-picker'
+import { MonthNav } from '@/components/ui/month-nav'
 import { StatusBadge, type StatusVariant } from '@/components/ui/status-badge'
 import {
   formatCurrency,
@@ -59,10 +60,14 @@ const ESTADO_VARIANT: Record<BPProjectEstado, StatusVariant> = {
   perdida: 'over',
 }
 
+type DetailMode = 'mensual' | 'anual'
+
 interface ProjectDetailModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   proyecto: Proyecto | null
+  /** Optional starting month for the Mensual view. Defaults to current month. */
+  mes?: number
   onEdit?: (p: Proyecto) => void
 }
 
@@ -73,16 +78,31 @@ interface DetailState {
   totalCost: number
   marginPercent: number
   bps: ProjectBPBreakdown[]
+  honorariosMensuales: { mes: number; honorarios: number }[]
 }
+
+const defaultMes = () => new Date().getMonth() + 1
 
 export function ProjectDetailModal({
   open,
   onOpenChange,
   proyecto,
+  mes,
   onEdit,
 }: ProjectDetailModalProps) {
   const [data, setData] = useState<DetailState | null>(null)
   const [loading, setLoading] = useState(false)
+  // Default to Anual: project-level summary is the typical first view.
+  const [mode, setMode] = useState<DetailMode>('anual')
+  const [internalMes, setInternalMes] = useState<number>(mes ?? defaultMes())
+
+  useEffect(() => {
+    if (open) {
+      setMode('anual')
+      setInternalMes(mes ?? defaultMes())
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, proyecto])
 
   useEffect(() => {
     if (!open || !proyecto) return
@@ -100,6 +120,7 @@ export function ProjectDetailModal({
         totalCost: detail.totalCost,
         marginPercent: detail.marginPercent,
         bps: detail.bps,
+        honorariosMensuales: detail.honorariosMensuales,
       })
       setLoading(false)
     })()
@@ -107,6 +128,37 @@ export function ProjectDetailModal({
       cancelled = true
     }
   }, [open, proyecto])
+
+  // Months in which this project has at least one asignacion OR booked
+  // honorarios — drives the clickable bars and the prev/next steppers.
+  const activeMonths = useMemo(() => {
+    if (!data) return [] as number[]
+    return MONTHS.filter((m) => {
+      const hasHoras = data.bps.some((b) => b.horasPorMes[m - 1] > 0)
+      const hasHonorarios = (data.honorariosMensuales.find((h) => h.mes === m)
+        ?.honorarios ?? 0) > 0
+      return hasHoras || hasHonorarios
+    })
+  }, [data])
+
+  function jumpToMonth(m: number) {
+    setInternalMes(m)
+    setMode('mensual')
+  }
+  function stepMonth(dir: -1 | 1) {
+    if (activeMonths.length === 0) return
+    if (dir === -1) {
+      const candidate = [...activeMonths].reverse().find((m) => m < internalMes)
+      if (candidate !== undefined) setInternalMes(candidate)
+    } else {
+      const candidate = activeMonths.find((m) => m > internalMes)
+      if (candidate !== undefined) setInternalMes(candidate)
+    }
+  }
+  const canPrev =
+    activeMonths.length > 0 && activeMonths.some((m) => m < internalMes)
+  const canNext =
+    activeMonths.length > 0 && activeMonths.some((m) => m > internalMes)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -118,75 +170,51 @@ export function ProjectDetailModal({
                 {proyecto?.nombre ?? 'Proyecto'}
               </DialogTitle>
               <DialogDescription>
-                {data?.proyecto.tipo
-                  ? `${data.proyecto.tipo} · `
-                  : ''}
-                Distribución anual
+                {data?.proyecto.tipo ? `${data.proyecto.tipo} · ` : ''}
+                {mode === 'anual'
+                  ? 'Distribución anual'
+                  : getMonthLabel(internalMes)}
               </DialogDescription>
             </div>
-            {proyecto && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => onEdit?.(proyecto)}
-                className="mt-1"
-              >
-                <Pencil className="w-3 h-3" />
-                Editar
-              </Button>
-            )}
+            <div className="flex items-center gap-2 mt-1">
+              <ModeToggle value={mode} onChange={setMode} />
+              {proyecto && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onEdit?.(proyecto)}
+                >
+                  <Pencil className="w-3 h-3" />
+                  Editar
+                </Button>
+              )}
+            </div>
           </div>
         </DialogHeader>
 
         <DialogBody className="flex-1 overflow-y-auto">
-          {/* KPIs */}
-          <div className="grid grid-cols-4 gap-3">
-            {loading || !data ? (
-              <KpiSkeletonGrid count={4} />
-            ) : (
-              <>
-                <KpiCard
-                  label="Ingresos año"
-                  value={formatCurrency(data.totalRevenue)}
-                />
-                <KpiCard
-                  label="Costo año"
-                  value={formatCurrency(data.totalCost)}
-                />
-                <KpiCard
-                  label="Margen"
-                  value={formatPercent(data.marginPercent)}
-                  meta={formatCurrency(data.totalRevenue - data.totalCost)}
-                />
-                <KpiCard
-                  label="Horas totales"
-                  value={formatHours(Math.round(data.totalHoras))}
-                  meta={`${data.bps.length} BPs`}
-                />
-              </>
-            )}
-          </div>
-
-          {/* Distribution */}
-          <div>
-            <h3 className="text-sm font-semibold tracking-snug mb-3">
-              Distribución de Brand Partners
-            </h3>
-            {loading || !data ? (
-              <div className="flex flex-col gap-4">
-                <div className="bg-base border border-border rounded-lg h-[280px]" />
+          {loading || !data ? (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <KpiSkeletonGrid count={4} />
+              </div>
+              <div className="mt-4">
                 <TableSkeleton rows={5} />
               </div>
-            ) : data.bps.length === 0 ? (
-              <EmptyState message="No hay asignaciones registradas para este proyecto." />
-            ) : (
-              <div className="flex flex-col gap-4">
-                <RevenueVsCostsChart bps={data.bps} />
-                <BPsMarginTable bps={data.bps} />
-              </div>
-            )}
-          </div>
+            </>
+          ) : mode === 'anual' ? (
+            <ProjectAnualView data={data} onMonthClick={jumpToMonth} />
+          ) : (
+            <ProjectMensualView
+              data={data}
+              mes={internalMes}
+              onPrev={() => stepMonth(-1)}
+              onNext={() => stepMonth(1)}
+              canPrev={canPrev}
+              canNext={canNext}
+            />
+          )}
         </DialogBody>
 
         <DialogFooter>
@@ -204,6 +232,408 @@ export function ProjectDetailModal({
 }
 
 // --------------------------------------------------------------------------
+// Mode toggle (matches the one in BPDetailModal)
+// --------------------------------------------------------------------------
+
+function ModeToggle({
+  value,
+  onChange,
+}: {
+  value: DetailMode
+  onChange: (m: DetailMode) => void
+}) {
+  return (
+    <div className="inline-flex rounded-md border border-border overflow-hidden">
+      {(['mensual', 'anual'] as DetailMode[]).map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onChange(m)}
+          aria-pressed={value === m}
+          className={cn(
+            'px-3 py-1.5 text-2xs font-medium uppercase tracking-wider transition-colors',
+            value === m
+              ? 'bg-accent text-white'
+              : 'bg-base text-secondary hover:bg-hover'
+          )}
+        >
+          {m === 'mensual' ? 'Mensual' : 'Anual'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------
+// ANUAL view
+// --------------------------------------------------------------------------
+
+function ProjectAnualView({
+  data,
+  onMonthClick,
+}: {
+  data: DetailState
+  onMonthClick: (m: number) => void
+}) {
+  // Per-month aggregates derived from the BP breakdowns + booked honorarios.
+  const perMonth = useMemo(() => {
+    const honorariosMap = new Map(
+      data.honorariosMensuales.map((h) => [h.mes, Number(h.honorarios) || 0])
+    )
+    return MONTHS.map((m) => {
+      const i = m - 1
+      const horas = data.bps.reduce((s, b) => s + (b.horasPorMes[i] ?? 0), 0)
+      const costo = data.bps.reduce((s, b) => s + (b.costosPorMes[i] ?? 0), 0)
+      const ingreso = honorariosMap.get(m) ?? 0
+      const margen = ingreso - costo
+      return { mes: m, horas, costo, ingreso, margen }
+    })
+  }, [data])
+
+  // Drop months with no data — keeps the chart focused on what's loaded.
+  const activeMonths = perMonth.filter(
+    (m) => m.horas > 0 || m.ingreso > 0 || m.costo > 0
+  )
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiCard
+          label="Ingresos año"
+          value={formatCurrency(data.totalRevenue)}
+        />
+        <KpiCard label="Costo año" value={formatCurrency(data.totalCost)} />
+        <KpiCard
+          label="Margen"
+          value={formatPercent(data.marginPercent)}
+          meta={formatCurrency(data.totalRevenue - data.totalCost)}
+        />
+        <KpiCard
+          label="Horas totales"
+          value={formatHours(Math.round(data.totalHoras))}
+          meta={`${data.bps.length} BPs`}
+        />
+      </div>
+
+      {activeMonths.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold tracking-snug">
+              Margen por mes
+            </h3>
+            <div className="text-2xs text-tertiary italic">
+              Clickeá un mes para ver el detalle
+            </div>
+          </div>
+          <div className="bg-base border border-border rounded-lg p-3">
+            <div className="h-[240px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={activeMonths.map((m) => ({
+                    name: getMonthLabel(m.mes).slice(0, 3),
+                    mesNum: m.mes,
+                    Ingreso: Math.round(m.ingreso),
+                    Costo: Math.round(m.costo),
+                    Margen: Math.round(m.margen),
+                  }))}
+                  margin={{ top: 8, right: 12, left: 0, bottom: 4 }}
+                >
+                  <CartesianGrid
+                    stroke="var(--border)"
+                    strokeDasharray="3 3"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="name"
+                    stroke="var(--text-tertiary)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    stroke="var(--text-tertiary)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v: number) => formatCurrencyCompact(v)}
+                  />
+                  <Tooltip
+                    contentStyle={chartTooltipStyle}
+                    cursor={{ fill: 'var(--bg-hover)' }}
+                    formatter={(v: number, name: string) => [
+                      formatCurrency(v),
+                      name,
+                    ]}
+                  />
+                  <Legend
+                    wrapperStyle={{
+                      fontSize: 11,
+                      color: 'var(--text-secondary)',
+                    }}
+                  />
+                  <Bar
+                    dataKey="Ingreso"
+                    fill="var(--accent)"
+                    radius={[3, 3, 0, 0]}
+                    cursor="pointer"
+                    onClick={(d: { mesNum?: number }) =>
+                      typeof d.mesNum === 'number' && onMonthClick(d.mesNum)
+                    }
+                  />
+                  <Bar
+                    dataKey="Costo"
+                    fill="var(--text-tertiary)"
+                    fillOpacity={0.55}
+                    radius={[3, 3, 0, 0]}
+                    cursor="pointer"
+                    onClick={(d: { mesNum?: number }) =>
+                      typeof d.mesNum === 'number' && onMonthClick(d.mesNum)
+                    }
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {data.bps.length === 0 ? (
+        <EmptyState message="No hay asignaciones registradas para este proyecto." />
+      ) : (
+        <div className="flex flex-col gap-4">
+          <RevenueVsCostsChart bps={data.bps} />
+          <BPsMarginTable bps={data.bps} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------
+// MENSUAL view
+// --------------------------------------------------------------------------
+
+function ProjectMensualView({
+  data,
+  mes,
+  onPrev,
+  onNext,
+  canPrev,
+  canNext,
+}: {
+  data: DetailState
+  mes: number
+  onPrev: () => void
+  onNext: () => void
+  canPrev: boolean
+  canNext: boolean
+}) {
+  const i = mes - 1
+  const ingreso =
+    Number(
+      data.honorariosMensuales.find((h) => h.mes === mes)?.honorarios ?? 0
+    ) || 0
+  const bpsDelMes = data.bps
+    .map((b) => ({
+      bp_id: b.bp_id,
+      bp: b.bp,
+      bp_name: b.bp_name,
+      horas: b.horasPorMes[i] ?? 0,
+      costo: b.costosPorMes[i] ?? 0,
+      ingresoRef: b.ingresosPorMes[i] ?? 0,
+      ratePerHourProyecto: b.ratePerHourProyecto,
+    }))
+    .filter((b) => b.horas > 0 || b.costo > 0)
+    .sort((a, b) => b.horas - a.horas)
+
+  const horas = bpsDelMes.reduce((s, b) => s + b.horas, 0)
+  const costo = bpsDelMes.reduce((s, b) => s + b.costo, 0)
+  const margen = ingreso - costo
+  const marginPercent = ingreso > 0 ? (margen / ingreso) * 100 : 0
+
+  return (
+    <div className="flex flex-col gap-4">
+      <MonthNav
+        mes={mes}
+        onPrev={onPrev}
+        onNext={onNext}
+        canPrev={canPrev}
+        canNext={canNext}
+      />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiCard
+          label="Ingreso del mes"
+          value={ingreso > 0 ? formatCurrency(ingreso) : '—'}
+        />
+        <KpiCard
+          label="Costo del mes"
+          value={costo > 0 ? formatCurrency(costo) : '—'}
+        />
+        <KpiCard
+          label="Margen del mes"
+          value={ingreso > 0 ? formatCurrency(margen) : '—'}
+          meta={ingreso > 0 ? formatPercent(marginPercent) : 'sin ingreso'}
+        />
+        <KpiCard
+          label="Horas del mes"
+          value={formatHours(Math.round(horas))}
+          meta={`${bpsDelMes.length} BPs`}
+        />
+      </div>
+
+      {bpsDelMes.length === 0 ? (
+        <EmptyState message={`Sin asignaciones en ${getMonthLabel(mes)}.`} />
+      ) : (
+        <>
+          <div className="bg-base border border-border rounded-lg p-3">
+            <div className="text-2xs font-medium uppercase tracking-wider text-secondary px-1 mb-2">
+              Ingreso vs Costo por BP — {getMonthLabel(mes)}
+            </div>
+            <div className="h-[240px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={bpsDelMes.map((b) => ({
+                    name: b.bp_name,
+                    'Ref. ingreso': Math.round(b.ingresoRef),
+                    'Costo BP': Math.round(b.costo),
+                    profitable: b.ingresoRef > b.costo,
+                  }))}
+                  margin={{ top: 8, right: 12, left: 0, bottom: 4 }}
+                >
+                  <CartesianGrid
+                    stroke="var(--border)"
+                    strokeDasharray="3 3"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="name"
+                    stroke="var(--text-tertiary)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    interval={0}
+                    angle={-25}
+                    textAnchor="end"
+                    height={56}
+                  />
+                  <YAxis
+                    stroke="var(--text-tertiary)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v: number) => formatCurrencyCompact(v)}
+                  />
+                  <Tooltip
+                    contentStyle={chartTooltipStyle}
+                    cursor={{ fill: 'var(--bg-hover)' }}
+                    formatter={(v: number, name: string) => [
+                      formatCurrency(v),
+                      name,
+                    ]}
+                  />
+                  <Legend
+                    wrapperStyle={{
+                      fontSize: 11,
+                      color: 'var(--text-secondary)',
+                    }}
+                  />
+                  <Bar dataKey="Ref. ingreso" radius={[3, 3, 0, 0]}>
+                    {bpsDelMes.map((b, idx) => (
+                      <Cell
+                        key={idx}
+                        fill={
+                          b.ingresoRef > b.costo
+                            ? 'var(--success)'
+                            : 'var(--danger)'
+                        }
+                      />
+                    ))}
+                  </Bar>
+                  <Bar
+                    dataKey="Costo BP"
+                    fill="var(--text-tertiary)"
+                    fillOpacity={0.55}
+                    radius={[3, 3, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="bg-base border border-border rounded-lg overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr>
+                  <Th>BP</Th>
+                  <Th numeric>Horas</Th>
+                  <Th numeric>$/h proy.</Th>
+                  <Th numeric>$/h BP</Th>
+                  <Th numeric>Ingreso ref.</Th>
+                  <Th numeric>Costo</Th>
+                  <Th numeric>Margen</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {bpsDelMes.map((b) => {
+                  const ratePerHourBp =
+                    b.horas > 0 ? b.costo / b.horas : 0
+                  const m = b.ingresoRef - b.costo
+                  return (
+                    <tr
+                      key={b.bp_id}
+                      className="border-b border-border last:border-0"
+                    >
+                      <td className="px-3 py-2 align-middle">
+                        <div className="flex flex-col gap-0.5 min-w-[140px]">
+                          <span className="font-medium whitespace-nowrap">
+                            {b.bp_name}
+                          </span>
+                          {b.bp && displaySeniority(b.bp) && (
+                            <span className="text-2xs text-tertiary">
+                              {displaySeniority(b.bp)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <Td numeric>{formatHours(Math.round(b.horas))}</Td>
+                      <Td numeric>
+                        {formatCurrency(b.ratePerHourProyecto, 2)}
+                      </Td>
+                      <Td numeric>
+                        {ratePerHourBp > 0
+                          ? formatCurrency(ratePerHourBp, 2)
+                          : '—'}
+                      </Td>
+                      <Td numeric>{formatCurrency(b.ingresoRef)}</Td>
+                      <Td numeric>{formatCurrency(b.costo)}</Td>
+                      <Td numeric>
+                        <span
+                          className={cn(
+                            'font-medium',
+                            m < 0
+                              ? 'text-danger'
+                              : m > 0
+                                ? 'text-success'
+                                : 'text-tertiary'
+                          )}
+                        >
+                          {formatCurrency(m)}
+                        </span>
+                      </Td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------------
 
 function RevenueVsCostsChart({ bps }: { bps: ProjectBPBreakdown[] }) {
   const chartData = bps.map((b) => ({
@@ -216,7 +646,7 @@ function RevenueVsCostsChart({ bps }: { bps: ProjectBPBreakdown[] }) {
   return (
     <div className="bg-base border border-border rounded-lg p-3">
       <div className="flex items-center justify-between text-2xs font-medium uppercase tracking-wider text-secondary px-1 mb-2">
-        <span>Ingreso vs Costo por BP</span>
+        <span>Ingreso vs Costo por BP (año)</span>
         <span className="text-tertiary normal-case tracking-normal">
           Ref. ingreso = horas × $/h proyecto · Costo = horas × $/h BP
         </span>
@@ -258,9 +688,6 @@ function RevenueVsCostsChart({ bps }: { bps: ProjectBPBreakdown[] }) {
             <Legend
               wrapperStyle={{ fontSize: 11, color: 'var(--text-secondary)' }}
             />
-            {/* Reference bar is green when the project's $/h beats the BP's
-                $/h, red otherwise. The cost bar stays neutral so the eye
-                anchors on the green/red signal. */}
             <Bar dataKey="Ref. ingreso" radius={[3, 3, 0, 0]}>
               {chartData.map((row, i) => (
                 <Cell

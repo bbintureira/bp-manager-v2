@@ -340,6 +340,7 @@ export function DashboardProyectos() {
         open={detailingProyecto !== null}
         onOpenChange={(o) => !o && setDetailingProyecto(null)}
         proyecto={detailingProyecto}
+        mes={mes}
         onEdit={(p) => {
           setDetailingProyecto(null)
           setEditingProyecto(p)
