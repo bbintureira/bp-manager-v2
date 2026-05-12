@@ -263,13 +263,15 @@ export function DashboardProyectos() {
     [tipoFilter, allTiposSelected, searchQuery]
   )
 
-  // Show every project (including newly-created ones with no BPs / no
-  // hours yet) so they're discoverable from the dashboard. Active ones
-  // float to the top by margin; the rest fall to the bottom alphabetical.
+  // Monthly view only surfaces projects that have actual data for this
+  // mes: either asignaciones (totalHoras > 0) or booked honorarios
+  // (revenue > 0). Empty / future projects are hidden so the table
+  // mirrors what's actually moving that month.
   const monthlyActive = useMemo(() => {
     if (!data || data.mode !== 'monthly') return []
     return data.projectSummaries
       .filter((s) => passesFilters(s.proyecto))
+      .filter((s) => s.totalHoras > 0 || s.revenue > 0)
       .sort((a, b) => {
         if (a.bps > 0 && b.bps === 0) return -1
         if (a.bps === 0 && b.bps > 0) return 1
@@ -567,7 +569,7 @@ export function DashboardProyectos() {
               message={
                 searchQuery || !allTiposSelected
                   ? 'Ningún proyecto coincide con los filtros.'
-                  : 'Sin asignaciones en este mes.'
+                  : 'No hay datos para este mes.'
               }
             />
           ) : (

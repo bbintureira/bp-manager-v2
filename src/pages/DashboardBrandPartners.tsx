@@ -193,13 +193,22 @@ export function DashboardBrandPartners() {
     return true
   }
 
+  // Monthly view hides BPs that have no asignacion in the selected mes
+  // — the table mirrors what's actually scheduled. Annual view keeps
+  // every BP because the columns aggregate across the year.
   const filteredHoras = useMemo(
-    () => allHorasRows.filter((r) => bpPasses(r.bp)),
+    () =>
+      allHorasRows.filter(
+        (r) => bpPasses(r.bp) && r.horasAsignadas > 0
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allHorasRows, searchQuery, grouperFilter, activoFilter]
   )
   const filteredRentabilidad = useMemo(
-    () => allRentabilidadRows.filter((r) => bpPasses(r.bp)),
+    () =>
+      allRentabilidadRows.filter(
+        (r) => bpPasses(r.bp) && r.byProject.length > 0
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allRentabilidadRows, searchQuery, grouperFilter, activoFilter]
   )
@@ -553,7 +562,9 @@ export function DashboardBrandPartners() {
             message={
               searchQuery
                 ? 'Ningún BP coincide con la búsqueda.'
-                : 'Sin BPs cargados.'
+                : view === 'monthly'
+                  ? 'No hay datos para este mes.'
+                  : 'Sin BPs cargados.'
             }
           />
         ) : view === 'monthly' && tab === 'horas' ? (
