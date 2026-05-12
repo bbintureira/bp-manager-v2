@@ -288,15 +288,18 @@ export interface ProjectMonthSummary {
 }
 
 /**
- * Per-project summary for `mes`. See ProjectMonthSummary docs for the
- * caveat on `cost`.
+ * Per-project summary for `mes`. Revenue is the booked honorarios for that
+ * month (from `proyecto_honorarios_mensuales`) — NOT a scalar × hours
+ * fallback. Cost is the per-BP rate × hours worked sum across the
+ * asignaciones in that month.
  */
 export function calculateProjectMargin(
   proyecto: Proyecto,
   asignaciones: Asignacion[],
   _sueldos: Sueldo[],
   mes: number,
-  brandPartners?: BrandPartner[]
+  brandPartners?: BrandPartner[],
+  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[]
 ): ProjectMonthSummary {
   void _sueldos
   const own = asignaciones.filter(
@@ -306,7 +309,14 @@ export function calculateProjectMargin(
   const bpIds = Array.from(new Set(own.map((a) => String(a.bp_id))))
   const bps = bpIds.length
 
-  const projectRate = valorHoraProyecto(proyecto)
+  // Effective project rate from the booked honorarios for this month
+  // (honorarios / horas_requeridas). Falls back to the legacy scalar only
+  // when no monthly row is provided at all.
+  const projectRate = valorHoraProyectoForMonth(
+    proyecto,
+    honorariosMensuales ?? [],
+    mes
+  )
 
   // Per-BP rate via the profitability model (sueldo / capacidad).
   const bpsById = new Map(
@@ -327,8 +337,19 @@ export function calculateProjectMargin(
   const utilization =
     bps === 0 ? 0 : (totalHoras / (HOURS_PER_MONTH * bps)) * 100
 
-  // Earned revenue: project hourly rate × hours actually assigned.
-  const revenue = projectRate * totalHoras
+  // Booked revenue for this month: the honorarios row for `mes`. Doesn't
+  // depend on hours worked — what you've contracted to bill that month.
+  const honorariosRow = honorariosMensuales?.find(
+    (h) => h.mes === mes && same(h.proyecto_id, proyecto.id)
+  )
+  const revenue = honorariosRow
+    ? num(honorariosRow.honorarios)
+    : // Fallback to the deprecated scalar only when no monthly data was
+      // passed in. Avoid the silent zero when the project has loaded
+      // honorarios but the caller forgot to thread them through.
+      honorariosMensuales === undefined
+      ? num(proyecto.precio_mensual ?? proyecto.honorarios_cotizador)
+      : 0
   // Per-asignacion cost: each BP's hourly cost × hours that BP worked here.
   const cost = own.reduce((s, a) => {
     const rate = bpRateById.get(String(a.bp_id)) ?? 0
@@ -357,10 +378,18 @@ export function summarizeAllProjects(
   asignaciones: Asignacion[],
   sueldos: Sueldo[],
   mes: number,
-  brandPartners?: BrandPartner[]
+  brandPartners?: BrandPartner[],
+  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[]
 ): ProjectMonthSummary[] {
   return proyectos.map((p) =>
-    calculateProjectMargin(p, asignaciones, sueldos, mes, brandPartners)
+    calculateProjectMargin(
+      p,
+      asignaciones,
+      sueldos,
+      mes,
+      brandPartners,
+      honorariosMensuales
+    )
   )
 }
 
@@ -585,11 +614,19 @@ export function summarizeProjectsAnnual(
   proyectos: Proyecto[],
   asignaciones: Asignacion[],
   sueldos: Sueldo[],
-  brandPartners?: BrandPartner[]
+  brandPartners?: BrandPartner[],
+  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[]
 ): ProjectAnnualSummary[] {
   return proyectos.map((p) => {
     const byMonth = MONTHS.map((m) =>
-      calculateProjectMargin(p, asignaciones, sueldos, m, brandPartners)
+      calculateProjectMargin(
+        p,
+        asignaciones,
+        sueldos,
+        m,
+        brandPartners,
+        honorariosMensuales
+      )
     )
     const revenue = byMonth.reduce((s, x) => s + x.revenue, 0)
     const cost = byMonth.reduce((s, x) => s + x.cost, 0)
