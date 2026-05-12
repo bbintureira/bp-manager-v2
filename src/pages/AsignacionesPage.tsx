@@ -41,6 +41,7 @@ import { StatusBadge } from '@/components/ui/status-badge'
 import { formatCurrency, formatHours, formatNumber, formatPercent } from '@/lib/format'
 import {
   HOURS_PER_MONTH,
+  getMesIngreso,
   summarizeAllProjectsRentabilidad,
   summarizeBPsAnnual,
   summarizeProjectsAnnual,
@@ -67,7 +68,20 @@ import { displaySeniority } from '@/lib/seniority'
 import { cn } from '@/lib/utils'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
-const ANNUAL_HOURS = HOURS_PER_MONTH * 12
+
+/** Annual capacity for a BP, respecting fecha_ingreso:
+ *  `(13 - mesIngreso) × capacidad_mensual`.
+ *  Falls back to `12 × HOURS_PER_MONTH` if `bp` is null (caller has no
+ *  BP context — e.g. a project row aggregating multiple BPs). */
+function annualHoursForBP(bp: BrandPartner | null | undefined): number {
+  if (!bp) return HOURS_PER_MONTH * 12
+  const mesIngreso = getMesIngreso(bp)
+  const capacidad =
+    bp.capacidad_horas_mensual != null && Number(bp.capacidad_horas_mensual) > 0
+      ? Number(bp.capacidad_horas_mensual)
+      : HOURS_PER_MONTH
+  return capacidad * (13 - mesIngreso)
+}
 
 // Both modes use the same edit state shape — the key just means different
 // things: in project mode it's bp_id, in BP mode it's proyecto_id.
@@ -321,16 +335,23 @@ export function AsignacionesPage() {
   }, [bpOrder, brandPartners, searchQuery])
 
   const stats = useMemo(() => {
+    const bpById = new Map(brandPartners.map((bp) => [String(bp.id), bp]))
     const totals = bpOrder.map((id) => {
       const arr = edits[id] ?? []
       return arr.reduce((s, x) => s + (Number.isFinite(x) ? x : 0), 0)
     })
     const totalHoras = totals.reduce((s, x) => s + x, 0)
     const numBps = bpOrder.filter((id) => totals[bpOrder.indexOf(id)] > 0).length
+    // Available hours: per-BP annual capacity respecting fecha_ingreso,
+    // summed across the BPs in the table.
+    const availableHoras = bpOrder.reduce(
+      (s, id) => s + annualHoursForBP(bpById.get(id)),
+      0
+    )
     const avgUtilization =
-      numBps === 0 ? 0 : (totalHoras / (numBps * ANNUAL_HOURS)) * 100
-    return { totalHoras, numBps, avgUtilization }
-  }, [bpOrder, edits])
+      availableHoras === 0 ? 0 : (totalHoras / availableHoras) * 100
+    return { totalHoras, numBps, avgUtilization, availableHoras }
+  }, [bpOrder, edits, brandPartners])
 
   // ----- derived (per-project "all" mode)
   const visibleAllRows = useMemo(() => {
@@ -479,9 +500,13 @@ export function AsignacionesPage() {
     })
     const totalHoras = totals.reduce((s, x) => s + x, 0)
     const numProyectos = totals.filter((t) => t > 0).length
-    const utilization = (totalHoras / ANNUAL_HOURS) * 100
-    return { totalHoras, numProyectos, utilization }
-  }, [proyectoOrder, bpEdits])
+    // The BP-view is scoped to a single BP (bpData?.bp). Capacity respects
+    // their fecha_ingreso instead of a hardcoded 12 × 160.
+    const annualHours = annualHoursForBP(bpData?.bp)
+    const utilization =
+      annualHours === 0 ? 0 : (totalHoras / annualHours) * 100
+    return { totalHoras, numProyectos, utilization, annualHours }
+  }, [proyectoOrder, bpEdits, bpData])
 
   const setBpCell = useCallback((proyecto_id: string, idx: number, raw: string) => {
     setBpEdits((prev) => {
@@ -735,7 +760,7 @@ export function AsignacionesPage() {
                 <KpiCard
                   label="Horas totales (año)"
                   value={formatHours(Math.round(stats.totalHoras))}
-                  meta={`sobre ${formatHours(stats.numBps * ANNUAL_HOURS)} disponibles`}
+                  meta={`sobre ${formatHours(Math.round(stats.availableHoras))} disponibles`}
                 />
                 <KpiCard
                   label="BPs asignados"
@@ -777,6 +802,11 @@ export function AsignacionesPage() {
                       }
                     : { primary: 'BP desconocido' }
                 }}
+                annualHoursForRow={(id) =>
+                  annualHoursForBP(
+                    brandPartners.find((b) => String(b.id) === id) ?? null
+                  )
+                }
                 onCell={setCell}
                 onDelete={(id, name, isPersisted) =>
                   setDeletingBp({ bp_id: id, name, isPersisted })
@@ -818,7 +848,7 @@ export function AsignacionesPage() {
                 <KpiCard
                   label="Horas totales (año)"
                   value={formatHours(Math.round(bpStats.totalHoras))}
-                  meta={`sobre ${formatHours(ANNUAL_HOURS)} disponibles`}
+                  meta={`sobre ${formatHours(Math.round(bpStats.annualHours))} disponibles`}
                 />
                 <KpiCard
                   label="Proyectos asignados"
@@ -860,6 +890,9 @@ export function AsignacionesPage() {
                       }
                     : { primary: 'Proyecto desconocido' }
                 }}
+                // BP-view: every row is a project under the same single BP,
+                // so each row's denominator is that BP's annual capacity.
+                annualHoursForRow={() => bpStats.annualHours}
                 onCell={setBpCell}
                 onDelete={(id, name, isPersisted) =>
                   setDeletingProyecto({ proyecto_id: id, name, isPersisted })
@@ -1183,6 +1216,11 @@ interface MonthlyEditGridProps {
   rowById: (id: string) => { primary: string; secondary?: string }
   onCell: (id: string, monthIdx: number, raw: string) => void
   onDelete: (id: string, name: string, isPersisted: boolean) => void
+  /** Annual capacity for a row's utilization denominator. Project-mode
+   *  callers pass `(bp_id) => annualHoursForBP(bp)`; BP-mode callers
+   *  return the page's single BP's annual hours for every row. Falls
+   *  back to 12 × 160 if omitted. */
+  annualHoursForRow?: (id: string) => number
 }
 
 function MonthlyEditGrid({
@@ -1193,6 +1231,7 @@ function MonthlyEditGrid({
   rowById,
   onCell,
   onDelete,
+  annualHoursForRow,
 }: MonthlyEditGridProps) {
   return (
     <div className="overflow-x-auto">
@@ -1216,7 +1255,10 @@ function MonthlyEditGrid({
             const values = edits[id] ?? new Array(12).fill(0)
             const isPersisted = Boolean(initial[id])
             const total = values.reduce((s, x) => s + x, 0)
-            const util = (total / ANNUAL_HOURS) * 100
+            const annualCap = annualHoursForRow
+              ? annualHoursForRow(id)
+              : HOURS_PER_MONTH * 12
+            const util = annualCap === 0 ? 0 : (total / annualCap) * 100
             return (
               <tr key={id} className="border-b border-border last:border-0">
                 <td className="sticky left-0 z-10 bg-base px-3 py-3 align-middle border-r border-border">

@@ -780,6 +780,12 @@ function horasAnnualColumns(
       ),
     },
     {
+      key: 'totalContratadas',
+      header: 'Contratadas año',
+      numeric: true,
+      render: (_v, row) => formatHours(Math.round(row.totalContratadas)),
+    },
+    {
       key: 'totalAsignadas',
       header: 'Asignadas año',
       numeric: true,
