@@ -1317,12 +1317,16 @@ export function bpHorasMonthRow(
   const ocupacion =
     horasContratadas > 0 ? (horasAsignadas / horasContratadas) * 100 : 0
 
-  // Group asignaciones by project (a BP could have multiple rows per project,
-  // though in practice not; we sum just in case).
+  // Group asignaciones by project (a BP could have multiple rows per
+  // project, though in practice not; we sum just in case). Skip zero-hour
+  // rows so projects with stale `0h` asignaciones for the mes don't show
+  // up in the per-month detail tables.
   const byProjMap = new Map<string, number>()
   for (const a of own) {
+    const h = num(a.horas)
+    if (h <= 0) continue
     const key = String(a.proyecto_id)
-    byProjMap.set(key, (byProjMap.get(key) ?? 0) + num(a.horas))
+    byProjMap.set(key, (byProjMap.get(key) ?? 0) + h)
   }
   const projById = new Map(proyectos.map((p) => [String(p.id), p]))
   const byProject: BPProjectHorasRow[] = Array.from(byProjMap.entries())
@@ -1431,13 +1435,15 @@ export function bpRentabilidadMonthRow(
   const projById = new Map(proyectos.map((p) => [String(p.id), p]))
   const byProjMap = new Map<string, { proyecto: Proyecto; horas: number }>()
   for (const a of own) {
+    const h = num(a.horas)
+    if (h <= 0) continue
     const proyecto = projById.get(String(a.proyecto_id))
     if (!proyecto) continue
     const key = String(a.proyecto_id)
     const prev = byProjMap.get(key)
     byProjMap.set(key, {
       proyecto,
-      horas: (prev?.horas ?? 0) + num(a.horas),
+      horas: (prev?.horas ?? 0) + h,
     })
   }
 
