@@ -62,7 +62,6 @@ interface EditProjectDialogProps {
 interface BasicFormState {
   nombre: string
   tipo: string
-  precio_mensual: string
   horas_requeridas: string
   fecha_inicio: string
   status: string
@@ -72,12 +71,6 @@ function basicFromProyecto(p: Proyecto | null): BasicFormState {
   return {
     nombre: p?.nombre ?? '',
     tipo: p?.tipo ?? 'Always On',
-    precio_mensual:
-      p?.precio_mensual != null
-        ? String(p.precio_mensual)
-        : p?.honorarios_cotizador != null
-          ? String(p.honorarios_cotizador)
-          : '',
     horas_requeridas:
       p?.horas_requeridas_mensual != null
         ? String(p.horas_requeridas_mensual)
@@ -146,18 +139,25 @@ export function EditProjectDialog({
     () =>
       basic.nombre !== initialBasic.nombre ||
       basic.tipo !== initialBasic.tipo ||
-      basic.precio_mensual !== initialBasic.precio_mensual ||
       basic.horas_requeridas !== initialBasic.horas_requeridas ||
       basic.fecha_inicio !== initialBasic.fecha_inicio ||
       basic.status !== initialBasic.status,
     [basic, initialBasic]
   )
 
-  const precioNum = Number(basic.precio_mensual)
   const horasReqNum = Number(basic.horas_requeridas)
+  // Average of monthly honorarios — used for the live "valor / h" preview
+  // and (on save) cached into proyecto.precio_mensual so legacy code that
+  // still reads the scalar stays consistent.
+  const honorariosTotal = honorarios.reduce((s, v) => s + v, 0)
+  const honorariosMesesConValor = honorarios.filter((v) => v > 0).length
+  const precioPromedio =
+    honorariosMesesConValor === 0
+      ? 0
+      : honorariosTotal / honorariosMesesConValor
   const valorHora =
-    Number.isFinite(precioNum) && Number.isFinite(horasReqNum) && horasReqNum > 0
-      ? precioNum / horasReqNum
+    precioPromedio > 0 && Number.isFinite(horasReqNum) && horasReqNum > 0
+      ? precioPromedio / horasReqNum
       : null
 
   const honorariosDirty = useMemo(() => {
@@ -207,23 +207,34 @@ export function EditProjectDialog({
 
     // Run both updates in parallel; collect partial failures.
     const tasks: Promise<{ kind: string; ok: boolean; error?: string }>[] = []
-    if (basicDirty) {
-      const precio = Number.isFinite(precioNum) ? precioNum : null
+    // When honorarios change, refresh the cached scalar precio_mensual +
+    // legacy honorarios_cotizador so any code path that still reads them
+    // stays in lockstep with the monthly source of truth.
+    const refreshScalars = honorariosDirty
+      ? precioPromedio > 0
+        ? {
+            honorarios_cotizador: precioPromedio,
+            precio_mensual: precioPromedio,
+          }
+        : { honorarios_cotizador: 0, precio_mensual: null }
+      : null
+
+    if (basicDirty || refreshScalars) {
       tasks.push(
         updateProyecto(proyecto.id, {
-          nombre: basic.nombre.trim(),
-          tipo: basic.tipo.trim() || null,
-          // Mirror precio into legacy honorarios_cotizador only when the
-          // user actually entered a number — otherwise leave the legacy
-          // value untouched.
-          ...(precio !== null && precio > 0
-            ? { honorarios_cotizador: precio, precio_mensual: precio }
+          ...(basicDirty
+            ? {
+                nombre: basic.nombre.trim(),
+                tipo: basic.tipo.trim() || null,
+                horas_requeridas_mensual:
+                  Number.isFinite(horasReqNum) && horasReqNum > 0
+                    ? horasReqNum
+                    : null,
+                fecha_inicio: basic.fecha_inicio || null,
+                status: basic.status,
+              }
             : {}),
-          horas_requeridas_mensual: Number.isFinite(horasReqNum) && horasReqNum > 0
-            ? horasReqNum
-            : null,
-          fecha_inicio: basic.fecha_inicio || null,
-          status: basic.status,
+          ...(refreshScalars ?? {}),
         }).then((r) => ({
           kind: 'datos básicos',
           ok: r.success,
@@ -332,45 +343,29 @@ export function EditProjectDialog({
               </Field>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Field id="ep-precio" label="Precio mensual" required>
-                <Input
-                  id="ep-precio"
-                  type="number"
-                  inputMode="decimal"
-                  min="0"
-                  step="0.01"
-                  value={basic.precio_mensual}
-                  onChange={(e) =>
-                    setBasic({ ...basic, precio_mensual: e.target.value })
-                  }
-                  required
-                />
-              </Field>
-
-              <Field
+            <Field
+              id="ep-horas-req"
+              label="Horas requeridas / mes"
+              required
+              hint="El precio se carga abajo, mes a mes, en honorarios."
+            >
+              <Input
                 id="ep-horas-req"
-                label="Horas requeridas / mes"
+                type="number"
+                inputMode="decimal"
+                min="1"
+                step="1"
+                value={basic.horas_requeridas}
+                onChange={(e) =>
+                  setBasic({ ...basic, horas_requeridas: e.target.value })
+                }
                 required
-              >
-                <Input
-                  id="ep-horas-req"
-                  type="number"
-                  inputMode="decimal"
-                  min="1"
-                  step="1"
-                  value={basic.horas_requeridas}
-                  onChange={(e) =>
-                    setBasic({ ...basic, horas_requeridas: e.target.value })
-                  }
-                  required
-                />
-              </Field>
-            </div>
+              />
+            </Field>
 
             {valorHora !== null && valorHora > 0 && (
               <div className="text-2xs text-tertiary -mt-2">
-                Valor / h proyecto:{' '}
+                Valor / h proyecto (promedio):{' '}
                 <span className="font-mono font-medium text-secondary">
                   ${valorHora.toFixed(2)}
                 </span>

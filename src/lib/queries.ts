@@ -18,9 +18,13 @@ export interface Proyecto {
   id: Id
   nombre: string
   tipo: string | null
-  /** Legacy scalar — kept in sync with `precio_mensual` from new forms. */
+  /** @deprecated Legacy scalar. Mirrors `precio_mensual` for backwards
+   *  compat; new code should read `proyecto_honorarios_mensuales` instead. */
   honorarios_cotizador: number
-  /** New profitability model: monthly price for the project. */
+  /** @deprecated Cached average of `proyecto_honorarios_mensuales.honorarios`
+   *  for the project. The per-month table is the source of truth for
+   *  rentabilidad calculations — this scalar is auto-refreshed on save
+   *  when the monthly grid changes, but should not be edited directly. */
   precio_mensual: number | null
   /** New profitability model: monthly hours the project requires. */
   horas_requeridas_mensual: number | null

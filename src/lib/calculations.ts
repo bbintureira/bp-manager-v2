@@ -13,7 +13,13 @@ export const HOURS_PER_MONTH = 160
 // Profitability model (per-project / per-BP rates)
 // ---------------------------------------------------------------------------
 
-/** Project's per-hour value: precio_mensual / horas_requeridas_mensual.
+/**
+ * @deprecated Reads the cached scalar `proyecto.precio_mensual` (which is
+ *   auto-derived from the monthly honorarios table on save). For new code
+ *   prefer `valorHoraProyectoForMonth` so the rate reflects the actual
+ *   monthly honorarios row, not the annual average snapshot.
+ *
+ * Project's per-hour value: precio_mensual / horas_requeridas_mensual.
  * Falls back to legacy `honorarios_cotizador / 160` when the new fields
  * aren't filled. Returns 0 when neither path yields a positive rate. */
 export function valorHoraProyecto(p: Proyecto): number {
