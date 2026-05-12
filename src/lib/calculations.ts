@@ -766,12 +766,16 @@ export interface ProjectBPBreakdown {
   percentOfProject: number
   /** Yearly sueldo billed for this BP (for reference). */
   totalSueldo: number
-  /** Project's effective per-hour rate, computed from booked honorarios:
-   *  `Σ honorarios_mes / Σ horas_proyecto_mes`. Same for every row. */
+  /** Project's contractual per-hour rate: average of
+   *  `honorarios_mes / horas_requeridas_mensual` over months with data.
+   *  Same for every row in the project. */
   ratePerHourProyecto: number
   /** Effective per-hour BP rate, weighted across the months they actually worked. */
   ratePerHourBpAvg: number
-  /** Yearly revenue this BP generates on the project: totalHoras × ratePerHourProyecto. */
+  /** Reference value of this BP's hours at the project's contractual rate:
+   *  `Σ_mes horas_bp[m] × (honorarios[m] / horas_requeridas_mensual)`.
+   *  Not a real income figure — compared to `costosAnuales` it answers
+   *  "is the project profitable on this BP at the contracted rate?". */
   ingresosAnuales: number
   /** Yearly cost the BP represents on the project: Σ horas[mes] × sueldo[mes]/160. */
   costosAnuales: number
@@ -785,12 +789,15 @@ export interface ProjectBPBreakdown {
  * Group `asignaciones` by BP for a given project, with month-by-month hours
  * and the BP's % share of total project hours. Sorted by hours desc.
  *
- * Per-BP ingresos: each BP gets a slice of the project's booked honorarios
- * proportional to the hours they contributed that month. Concretely, for
- * each month m: `ingreso_bp_m = honorarios[m] × (horas_bp_m / horas_total_proyecto_m)`.
- * Summed across the 12 months. This guarantees Σ across BPs = total
- * project revenue (`Σ honorarios[m]`), unlike the older `valorHoraProyecto ×
- * horas` model which only matched the totals by coincidence.
+ * Per-BP ingresos use the project's contractual hourly rate:
+ *   `ingreso_bp = Σ_mes horas_bp[m] × (honorarios[m] / horas_requeridas_mensual)`
+ * This represents "what those hours are worth at project rate" — a
+ * theoretical reference for comparing against the BP's actual cost.
+ * The sum across BPs does NOT necessarily equal the project's booked
+ * revenue: if BPs collectively worked fewer hours than `horas_requeridas`,
+ * the project has unrealized income (sub-utilization); if more, the
+ * opposite. The comparison ingreso_ref vs costo is what surfaces the
+ * project's profitability decision per BP.
  */
 export function buildBPsForProject(
   proyecto: Proyecto,
@@ -803,24 +810,28 @@ export function buildBPsForProject(
   const totalProject = own.reduce((s, a) => s + num(a.horas), 0)
   const bpMap = new Map(brandPartners.map((b) => [String(b.id), b]))
 
-  // Project-level totals per month: total hours worked + booked honorarios.
-  // Used to weight each BP's slice of the income.
-  const horasProyectoPorMes = new Array(12).fill(0) as number[]
-  for (const a of own) {
-    const idx = a.mes - 1
-    if (idx >= 0 && idx < 12) horasProyectoPorMes[idx] += num(a.horas)
-  }
+  // Project's contractual rate per month: honorarios[m] / horas_requeridas.
+  const horasRequeridas =
+    proyecto.horas_requeridas_mensual != null &&
+    num(proyecto.horas_requeridas_mensual) > 0
+      ? num(proyecto.horas_requeridas_mensual)
+      : HOURS_PER_MONTH
   const honorariosPorMes = new Array(12).fill(0) as number[]
   for (const h of honorariosMensuales) {
     const idx = h.mes - 1
     if (idx >= 0 && idx < 12) honorariosPorMes[idx] = num(h.honorarios)
   }
-  // Annual project revenue, surfaced as a per-row reference and to derive
-  // a fallback rate when the booked value is missing.
-  const totalRevenueProyecto = honorariosPorMes.reduce((s, x) => s + x, 0)
+  const ratePerHourProyectoPorMes = honorariosPorMes.map((hon) =>
+    hon > 0 ? hon / horasRequeridas : 0
+  )
+  // Single "project rate" shown in the row: avg of months with booked
+  // honorarios. Falls back to the deprecated scalar only if nothing was
+  // loaded into the monthly grid.
+  const monthsWithHonorarios = ratePerHourProyectoPorMes.filter((r) => r > 0)
   const ratePerHourProyecto =
-    totalProject > 0
-      ? totalRevenueProyecto / totalProject
+    monthsWithHonorarios.length > 0
+      ? monthsWithHonorarios.reduce((s, r) => s + r, 0) /
+        monthsWithHonorarios.length
       : valorHoraProyecto(proyecto)
 
   const byBp = new Map<string, Asignacion[]>()
@@ -860,16 +871,11 @@ export function buildBPsForProject(
       const sueldo = sueldoByMes.get(i + 1) ?? 0
       costosAnuales += horas * (sueldo / HOURS_PER_MONTH)
     }
-    // Ingresos: BP's slice of each month's booked honorarios, weighted by
-    // the hours they contributed that month relative to the project total.
+    // Ingreso de referencia: BP's hours × project's contractual rate for
+    // each month. Tells you what the BP's hours are worth at project rate.
     let ingresosAnuales = 0
     for (let i = 0; i < 12; i++) {
-      const horasBp = horasPorMes[i]
-      const horasProj = horasProyectoPorMes[i]
-      const honorarios = honorariosPorMes[i]
-      if (horasProj > 0 && honorarios > 0) {
-        ingresosAnuales += honorarios * (horasBp / horasProj)
-      }
+      ingresosAnuales += horasPorMes[i] * ratePerHourProyectoPorMes[i]
     }
     const marginPercent =
       ingresosAnuales > 0

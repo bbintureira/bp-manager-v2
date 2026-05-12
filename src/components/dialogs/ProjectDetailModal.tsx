@@ -4,6 +4,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -207,15 +208,17 @@ export function ProjectDetailModal({
 function RevenueVsCostsChart({ bps }: { bps: ProjectBPBreakdown[] }) {
   const chartData = bps.map((b) => ({
     name: b.bp_name,
-    Ingresos: Math.round(b.ingresosAnuales),
-    Costos: Math.round(b.costosAnuales),
+    'Ref. ingreso': Math.round(b.ingresosAnuales),
+    'Costo BP': Math.round(b.costosAnuales),
+    /** Sign of the per-BP margin — drives the reference-bar tint. */
+    profitable: b.ingresosAnuales > b.costosAnuales,
   }))
   return (
     <div className="bg-base border border-border rounded-lg p-3">
       <div className="flex items-center justify-between text-2xs font-medium uppercase tracking-wider text-secondary px-1 mb-2">
-        <span>Ingresos vs Costos por BP</span>
+        <span>Ingreso vs Costo por BP</span>
         <span className="text-tertiary normal-case tracking-normal">
-          La diferencia (azul − rojo) es el margen anual
+          Ref. ingreso = horas × $/h proyecto · Costo = horas × $/h BP
         </span>
       </div>
       <div className="h-[260px]">
@@ -255,8 +258,23 @@ function RevenueVsCostsChart({ bps }: { bps: ProjectBPBreakdown[] }) {
             <Legend
               wrapperStyle={{ fontSize: 11, color: 'var(--text-secondary)' }}
             />
-            <Bar dataKey="Ingresos" fill="var(--accent)" radius={[3, 3, 0, 0]} />
-            <Bar dataKey="Costos" fill="var(--danger)" radius={[3, 3, 0, 0]} />
+            {/* Reference bar is green when the project's $/h beats the BP's
+                $/h, red otherwise. The cost bar stays neutral so the eye
+                anchors on the green/red signal. */}
+            <Bar dataKey="Ref. ingreso" radius={[3, 3, 0, 0]}>
+              {chartData.map((row, i) => (
+                <Cell
+                  key={i}
+                  fill={row.profitable ? 'var(--success)' : 'var(--danger)'}
+                />
+              ))}
+            </Bar>
+            <Bar
+              dataKey="Costo BP"
+              fill="var(--text-tertiary)"
+              fillOpacity={0.55}
+              radius={[3, 3, 0, 0]}
+            />
           </BarChart>
         </ResponsiveContainer>
       </div>
