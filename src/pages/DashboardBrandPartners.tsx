@@ -212,17 +212,62 @@ export function DashboardBrandPartners() {
     [allRentabilidadAnnual, searchQuery, grouperFilter, activoFilter]
   )
 
-  // KPIs are tab-independent: the page-level cards always describe team
-  // utilization (BPs activos / % ocupación / horas libres). The
-  // Rentabilidad-specific metrics live inside the per-BP rows + detail
-  // modal, not at the global page header.
+  // KPIs adapt to the active tab. Horas shows team utilization;
+  // Rentabilidad shows margen / cobertura salarial aggregates. Both use
+  // the filtered set so KPIs always reflect what's visible in the table.
   const kpiStats = useMemo(() => {
     const monthly = view === 'monthly'
+
+    if (tab === 'rentabilidad') {
+      if (monthly) {
+        const totalMargen = filteredRentabilidad.reduce(
+          (s, r) => s + r.margen,
+          0
+        )
+        const totalCobertura = filteredRentabilidad.reduce(
+          (s, r) => s + r.coberturaSalarial,
+          0
+        )
+        const total = filteredRentabilidad.length
+        // BP "covered" when costo_real ≥ sueldo → coberturaSalarial ≥ 0.
+        const covered = filteredRentabilidad.filter(
+          (r) => r.sueldoMensual > 0 && r.coberturaSalarial >= 0
+        ).length
+        const pctCovered = total === 0 ? 0 : (covered / total) * 100
+        return {
+          kind: 'rentabilidad-mes' as const,
+          totalMargen,
+          totalCobertura,
+          pctCovered,
+          total,
+          covered,
+        }
+      }
+      const totalMargen = filteredRentabilidadAnnual.reduce(
+        (s, r) => s + r.totalMargen,
+        0
+      )
+      const totalCobertura = filteredRentabilidadAnnual.reduce(
+        (s, r) => s + r.totalCoberturaSalarial,
+        0
+      )
+      const total = filteredRentabilidadAnnual.length
+      const covered = filteredRentabilidadAnnual.filter(
+        (r) => r.totalSueldo > 0 && r.totalCoberturaSalarial >= 0
+      ).length
+      const pctCovered = total === 0 ? 0 : (covered / total) * 100
+      return {
+        kind: 'rentabilidad-año' as const,
+        totalMargen,
+        totalCobertura,
+        pctCovered,
+        total,
+        covered,
+      }
+    }
+
+    // tab === 'horas'
     const rows = monthly ? filteredHoras : filteredHorasAnnual
-    // Active count is computed from the filtered set so it respects
-    // grouper/search filters but ignores the activos/inactivos toggle:
-    // "Total BPs activos" should always count actives, regardless of
-    // whether the user is currently viewing the inactive list.
     const activos = rows.filter((r) => r.bp.activo !== false).length
 
     if (monthly) {
@@ -257,7 +302,14 @@ export function DashboardBrandPartners() {
     // across teams of different sizes.
     const libresPromedioMes = totalLibres / 12
     return { kind: 'año' as const, activos, ocupacion, libresPromedioMes }
-  }, [view, filteredHoras, filteredHorasAnnual])
+  }, [
+    tab,
+    view,
+    filteredHoras,
+    filteredHorasAnnual,
+    filteredRentabilidad,
+    filteredRentabilidadAnnual,
+  ])
 
   const topbarActions = (
     <div className="flex items-center gap-2">
@@ -428,7 +480,7 @@ export function DashboardBrandPartners() {
               meta="del mes"
             />
           </>
-        ) : (
+        ) : kpiStats.kind === 'año' ? (
           <>
             <KpiCard
               label="Total BPs activos"
@@ -444,6 +496,46 @@ export function DashboardBrandPartners() {
               value={formatCompactHours(Math.round(kpiStats.libresPromedioMes))}
               fullValue={formatHours(Math.round(kpiStats.libresPromedioMes))}
               meta="por mes"
+            />
+          </>
+        ) : kpiStats.kind === 'rentabilidad-mes' ? (
+          <>
+            <KpiCard
+              label="Margen total"
+              value={formatCompactCurrency(kpiStats.totalMargen)}
+              fullValue={formatCurrency(kpiStats.totalMargen)}
+              meta="del mes"
+            />
+            <KpiCard
+              label="Cobertura salarial total"
+              value={formatCompactCurrency(kpiStats.totalCobertura)}
+              fullValue={formatCurrency(kpiStats.totalCobertura)}
+              meta="costo real − sueldo"
+            />
+            <KpiCard
+              label="% BPs con costo ≥ sueldo"
+              value={formatPercent(kpiStats.pctCovered)}
+              meta={`${kpiStats.covered} de ${kpiStats.total}`}
+            />
+          </>
+        ) : (
+          <>
+            <KpiCard
+              label="Margen total"
+              value={formatCompactCurrency(kpiStats.totalMargen)}
+              fullValue={formatCurrency(kpiStats.totalMargen)}
+              meta="del año"
+            />
+            <KpiCard
+              label="Cobertura salarial total"
+              value={formatCompactCurrency(kpiStats.totalCobertura)}
+              fullValue={formatCurrency(kpiStats.totalCobertura)}
+              meta="costo real − sueldo (año)"
+            />
+            <KpiCard
+              label="% BPs con costo ≥ sueldo"
+              value={formatPercent(kpiStats.pctCovered)}
+              meta={`${kpiStats.covered} de ${kpiStats.total}`}
             />
           </>
         )}
@@ -475,6 +567,23 @@ export function DashboardBrandPartners() {
             data={filteredRentabilidad}
             rowKey={(r) => String(r.bp.id)}
             onRowClick={(r) => setDetailing(r.bp)}
+            footer={{
+              nombre: 'Totales',
+              margen: (() => {
+                const t = filteredRentabilidad.reduce(
+                  (s, r) => s + r.margen,
+                  0
+                )
+                return <MargenCell value={t} />
+              })(),
+              coberturaSalarial: (() => {
+                const t = filteredRentabilidad.reduce(
+                  (s, r) => s + r.coberturaSalarial,
+                  0
+                )
+                return <MargenCell value={t} />
+              })(),
+            }}
           />
         ) : tab === 'horas' ? (
           <DataTable
@@ -493,6 +602,23 @@ export function DashboardBrandPartners() {
             data={filteredRentabilidadAnnual}
             rowKey={(r) => String(r.bp.id)}
             onRowClick={(r) => setDetailing(r.bp)}
+            footer={{
+              nombre: 'Totales',
+              totalMargen: (() => {
+                const t = filteredRentabilidadAnnual.reduce(
+                  (s, r) => s + r.totalMargen,
+                  0
+                )
+                return <MargenCell value={t} />
+              })(),
+              coberturaSalarial: (() => {
+                const t = filteredRentabilidadAnnual.reduce(
+                  (s, r) => s + r.totalCoberturaSalarial,
+                  0
+                )
+                return <MargenCell value={t} />
+              })(),
+            }}
           />
         )}
       </Section>
@@ -737,6 +863,17 @@ function rentabilidadColumns(
         ),
     },
     {
+      key: 'coberturaSalarial',
+      header: 'Cobertura salarial',
+      numeric: true,
+      render: (_v, row) =>
+        row.sueldoMensual > 0 ? (
+          <MargenCell value={row.coberturaSalarial} />
+        ) : (
+          <span className="text-tertiary">—</span>
+        ),
+    },
+    {
       key: 'acciones',
       header: '',
       render: (_v, row) => (
@@ -891,6 +1028,17 @@ function rentabilidadAnnualColumns(
       render: (_v, row) =>
         row.totalIngreso > 0 ? (
           <MargenCell value={row.totalMargen} percent={row.margenPercent} />
+        ) : (
+          <span className="text-tertiary">—</span>
+        ),
+    },
+    {
+      key: 'coberturaSalarial',
+      header: 'Cobertura salarial',
+      numeric: true,
+      render: (_v, row) =>
+        row.totalSueldo > 0 ? (
+          <MargenCell value={row.totalCoberturaSalarial} />
         ) : (
           <span className="text-tertiary">—</span>
         ),

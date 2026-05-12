@@ -1362,6 +1362,10 @@ export interface BPRentabilidadMonthRow {
   margen: number
   /** margen / ingreso × 100 (0 if no ingreso). */
   margenPercent: number
+  /** "Cobertura salarial" = costo - sueldoMensual:
+   *   negative → projects didn't cover the salary (we're subsidising)
+   *   positive → projects recovered more than the salary (good). */
+  coberturaSalarial: number
   /** Per-project breakdown. */
   byProject: BPProjectRentabilidadRow[]
 }
@@ -1383,6 +1387,7 @@ export function bpRentabilidadMonthRow(
       costo: 0,
       margen: 0,
       margenPercent: 0,
+      coberturaSalarial: 0,
       byProject: [],
     }
   }
@@ -1430,6 +1435,10 @@ export function bpRentabilidadMonthRow(
   const margen = ingresoCotizado - costo
   const margenPercent =
     ingresoCotizado > 0 ? (margen / ingresoCotizado) * 100 : 0
+  // Cobertura salarial: positive when projects recovered more than the
+  // salary paid for the month (BP is fully covered); negative when we're
+  // subsidising idle time.
+  const coberturaSalarial = costo - sueldoMensual
 
   return {
     bp,
@@ -1438,6 +1447,7 @@ export function bpRentabilidadMonthRow(
     costo,
     margen,
     margenPercent,
+    coberturaSalarial,
     byProject,
   }
 }
@@ -1544,6 +1554,10 @@ export interface BPRentabilidadAnnualAggregate {
   margenPercent: number
   /** Mean monthly sueldo across months with sueldo > 0. */
   sueldoPromedio: number
+  /** Σ sueldoMensual across months in the BP's active window. */
+  totalSueldo: number
+  /** Σ coberturaSalarial (= totalCosto - totalSueldo). */
+  totalCoberturaSalarial: number
   /** Per-month margen, indexed 0..11. */
   byMonth: number[]
 }
@@ -1573,6 +1587,8 @@ export function bpRentabilidadAnnualAggregate(
     sueldosNonZero.length === 0
       ? 0
       : sueldosNonZero.reduce((s, x) => s + x, 0) / sueldosNonZero.length
+  const totalSueldo = year.byMonth.reduce((s, m) => s + m.sueldoMensual, 0)
+  const totalCoberturaSalarial = totalCosto - totalSueldo
   return {
     bp,
     totalIngreso,
@@ -1580,6 +1596,8 @@ export function bpRentabilidadAnnualAggregate(
     totalMargen,
     margenPercent,
     sueldoPromedio,
+    totalSueldo,
+    totalCoberturaSalarial,
     byMonth: year.byMonth.map((m) => m.margen),
   }
 }

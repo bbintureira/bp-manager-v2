@@ -30,6 +30,10 @@ export interface DataTableProps<T> {
   /** Stable key getter; default uses array index. */
   rowKey?: (row: T, idx: number) => string | number
   empty?: ReactNode
+  /** Optional totals row. Each entry's cell renders under its column; keys
+   *  omitted from the map render as blank cells. Rendered as a bold,
+   *  border-top tfoot row. */
+  footer?: Partial<Record<string, ReactNode>>
 }
 
 /**
@@ -44,6 +48,7 @@ export function DataTable<T>({
   className,
   rowKey,
   empty,
+  footer,
 }: DataTableProps<T>) {
   const clickable = Boolean(onRowClick)
   return (
@@ -112,6 +117,26 @@ export function DataTable<T>({
             </tr>
           ))}
         </tbody>
+        {footer && (
+          <tfoot>
+            <tr className="border-t-2 border-border-strong">
+              {columns.map((col) => (
+                <td
+                  key={col.key}
+                  className={cn(
+                    'px-5 py-3 text-xl font-semibold text-primary align-middle bg-base',
+                    col.align === 'right' || col.numeric
+                      ? 'text-right'
+                      : 'text-left',
+                    col.numeric && 'font-mono tabular-nums'
+                  )}
+                >
+                  {footer[col.key] ?? null}
+                </td>
+              ))}
+            </tr>
+          </tfoot>
+        )}
       </table>
     </div>
   )
