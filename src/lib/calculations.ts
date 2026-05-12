@@ -268,11 +268,56 @@ export function calculateBPCosts(
 }
 
 /**
+ * Annual idle hours across the BP roster, using the same "only months
+ * with at least one asignacion" rule as `bpHorasAnnualAggregate`:
+ *
+ *   idle_bp = (monthsWithAsig × capacidad) - Σ horas_asignadas_bp
+ *   total   = Σ over BPs of idle_bp
+ *
+ * Months without any asignacion don't add capacity to the denominator,
+ * so the figure stays in sync with the per-BP annual rows.
+ */
+export function calculateAnnualIdleHours(
+  brandPartners: BrandPartner[],
+  asignaciones: Asignacion[],
+  sueldos: Sueldo[] = []
+): number {
+  let total = 0
+  for (const bp of brandPartners) {
+    const mesIngreso = getMesIngreso(bp)
+    const mesEgreso = getMesEgreso(bp, sueldos)
+    const capacidad =
+      bp.capacidad_horas_mensual != null && num(bp.capacidad_horas_mensual) > 0
+        ? num(bp.capacidad_horas_mensual)
+        : HOURS_PER_MONTH
+    const monthsWithAsig = new Set<number>()
+    let asignadas = 0
+    for (const a of asignaciones) {
+      if (!same(a.bp_id, bp.id)) continue
+      const m = Number(a.mes)
+      if (!Number.isFinite(m) || m < mesIngreso || m > mesEgreso) continue
+      const h = num(a.horas)
+      if (h <= 0) continue
+      monthsWithAsig.add(m)
+      asignadas += h
+    }
+    const contratadas = monthsWithAsig.size * capacidad
+    total += Math.max(0, contratadas - asignadas)
+  }
+  return total
+}
+
+/**
  * Idle hours across the BP roster for the month. For each BP we compute
  * `max(0, capacidad - Σ horas en ese mes)` and add them up. BPs missing
  * entirely from `brandPartners` are not counted. BPs outside their
  * `[ingreso, egreso]` window contribute 0 idle hours (they weren't on
  * the team yet, or already left).
+ *
+ * Note: this is the per-month figure. For the annual total prefer
+ * `calculateAnnualIdleHours` — summing this per-mes over the year
+ * over-counts because months without any asignacion still contribute
+ * full capacity here.
  */
 export function calculateIdleHours(
   brandPartners: BrandPartner[],
@@ -799,9 +844,12 @@ export function calculateProyectosAnnualKpis(
     (s, m) => s + calculateBPCosts(asignaciones, sueldos, m),
     0
   )
-  const idleHours = MONTHS.reduce(
-    (s, m) => s + calculateIdleHours(brandPartners, asignaciones, m, sueldos),
-    0
+  // Annual idle uses the "months with asignaciones × capacidad" rule so
+  // the dashboard total matches the per-BP rows shown elsewhere.
+  const idleHours = calculateAnnualIdleHours(
+    brandPartners,
+    asignaciones,
+    sueldos
   )
   const activeProjects = new Set(
     asignaciones.map((a) => String(a.proyecto_id))
@@ -1447,10 +1495,26 @@ export function bpHorasAnnualAggregate(
   sueldos: Sueldo[] = []
 ): BPHorasAnnualAggregate {
   const year = bpHorasYear(bp, asignaciones, proyectos, sueldos)
-  const totalContratadas = year.byMonth.reduce(
-    (s, m) => s + m.horasContratadas,
-    0
-  )
+  const mesIngreso = getMesIngreso(bp)
+  const mesEgreso = getMesEgreso(bp, sueldos)
+  const capacidad =
+    bp.capacidad_horas_mensual != null && num(bp.capacidad_horas_mensual) > 0
+      ? num(bp.capacidad_horas_mensual)
+      : HOURS_PER_MONTH
+
+  // Annual `Contratadas` only counts months (in window) where this BP
+  // actually has at least one asignacion loaded — so future / empty
+  // months don't inflate the denominator. Per-month rows stay full
+  // capacidad; this rule applies only to the annual aggregate.
+  const monthsWithAsig = new Set<number>()
+  for (const a of asignaciones) {
+    if (!same(a.bp_id, bp.id)) continue
+    const m = Number(a.mes)
+    if (!Number.isFinite(m) || m < mesIngreso || m > mesEgreso) continue
+    if (num(a.horas) <= 0) continue
+    monthsWithAsig.add(m)
+  }
+  const totalContratadas = monthsWithAsig.size * capacidad
   const totalAsignadas = year.byMonth.reduce(
     (s, m) => s + m.horasAsignadas,
     0
