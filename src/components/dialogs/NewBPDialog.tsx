@@ -20,6 +20,8 @@ import { createBrandPartner, type Grouper } from '@/lib/queries'
 import { seniorityFromSueldo } from '@/lib/seniority'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
+const MES_OPTIONS = MONTHS.map((m) => ({ value: m, label: getMonthLabel(m) }))
+const INGRESO_YEAR = 2026
 
 interface NewBPDialogProps {
   open: boolean
@@ -35,6 +37,8 @@ interface FormState {
   grouper_id: string
   capacidad_horas: string
   activo: 'activo' | 'inactivo'
+  /** 1-12, defaults to January 2026. */
+  mes_ingreso: number
   /** Strings so the inputs behave naturally; parsed on save. */
   sueldos_por_mes: string[] // length 12
   fillAll: string
@@ -45,6 +49,7 @@ const initial: FormState = {
   grouper_id: '',
   capacidad_horas: '160',
   activo: 'activo',
+  mes_ingreso: 1,
   sueldos_por_mes: new Array(12).fill(''),
   fillAll: '',
 }
@@ -116,6 +121,7 @@ export function NewBPDialog({
       capacidad_horas_mensual:
         Number.isFinite(capNum) && capNum > 0 ? capNum : null,
       activo: form.activo === 'activo',
+      fecha_ingreso: `${INGRESO_YEAR}-${String(form.mes_ingreso).padStart(2, '0')}-01`,
       // Per-month grid → seeds `sueldos` rows, one per month.
       sueldos_por_mes: totalAnio > 0 ? sueldosNum : undefined,
     })
@@ -210,23 +216,45 @@ export function NewBPDialog({
               </Select>
             </Field>
 
-            <Field
-              id="nb-capacidad"
-              label="Capacidad horas / mes"
-              hint="Default: 160"
-            >
-              <Input
+            <div className="grid grid-cols-2 gap-3">
+              <Field
                 id="nb-capacidad"
-                type="number"
-                inputMode="decimal"
-                min="1"
-                step="1"
-                value={form.capacidad_horas}
-                onChange={(e) =>
-                  setForm({ ...form, capacidad_horas: e.target.value })
-                }
-              />
-            </Field>
+                label="Capacidad horas / mes"
+                hint="Default: 160"
+              >
+                <Input
+                  id="nb-capacidad"
+                  type="number"
+                  inputMode="decimal"
+                  min="1"
+                  step="1"
+                  value={form.capacidad_horas}
+                  onChange={(e) =>
+                    setForm({ ...form, capacidad_horas: e.target.value })
+                  }
+                />
+              </Field>
+
+              <Field
+                id="nb-mes-ingreso"
+                label={`Mes de ingreso ${INGRESO_YEAR}`}
+                hint="Los cálculos anuales arrancan desde este mes."
+              >
+                <Select
+                  id="nb-mes-ingreso"
+                  value={String(form.mes_ingreso)}
+                  onChange={(e) =>
+                    setForm({ ...form, mes_ingreso: Number(e.target.value) })
+                  }
+                >
+                  {MES_OPTIONS.map((o) => (
+                    <option key={o.value} value={String(o.value)}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
 
             {/* Section: sueldos por mes */}
             <div className="flex flex-col gap-2 mt-1">

@@ -35,6 +35,7 @@ import {
   bpHorasMonthRow,
   bpRentabilidadAnnualAggregate,
   bpRentabilidadMonthRow,
+  getMesIngreso,
   type BPHorasAnnualAggregate,
   type BPHorasMonthRow,
   type BPRentabilidadAnnualAggregate,
@@ -526,6 +527,18 @@ function InactivoPill() {
   )
 }
 
+/** Tiny "Desde marzo" pill that shows up next to BP names whose fecha_ingreso
+ *  is past January. Hidden for January (or null) to keep the roster clean. */
+function IngresoPill({ bp }: { bp: BrandPartner }) {
+  const mes = getMesIngreso(bp)
+  if (mes <= 1) return null
+  return (
+    <span className="text-2xs text-tertiary whitespace-nowrap">
+      Desde {getMonthLabel(mes).toLowerCase()}
+    </span>
+  )
+}
+
 function RowActions({
   onEdit,
   onDelete,
@@ -610,6 +623,7 @@ function horasColumns(
         <span className="inline-flex items-center gap-2">
           <span className="font-medium">{row.bp.nombre}</span>
           {row.bp.activo === false && <InactivoPill />}
+          <IngresoPill bp={row.bp} />
         </span>
       ),
     },
@@ -675,6 +689,7 @@ function rentabilidadColumns(
         <span className="inline-flex items-center gap-2">
           <span className="font-medium">{row.bp.nombre}</span>
           {row.bp.activo === false && <InactivoPill />}
+          <IngresoPill bp={row.bp} />
         </span>
       ),
     },
@@ -753,6 +768,7 @@ function horasAnnualColumns(
         <span className="inline-flex items-center gap-2 whitespace-nowrap">
           <span className="font-medium">{row.bp.nombre}</span>
           {row.bp.activo === false && <InactivoPill />}
+          <IngresoPill bp={row.bp} />
         </span>
       ),
     },
@@ -826,6 +842,7 @@ function rentabilidadAnnualColumns(
         <span className="inline-flex items-center gap-2 whitespace-nowrap">
           <span className="font-medium">{row.bp.nombre}</span>
           {row.bp.activo === false && <InactivoPill />}
+          <IngresoPill bp={row.bp} />
         </span>
       ),
     },

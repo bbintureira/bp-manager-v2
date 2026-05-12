@@ -48,6 +48,10 @@ export interface BrandPartner {
   capacidad_horas_mensual: number | null
   /** True = currently working with us. False = inactive. Null treated as true. */
   activo: boolean | null
+  /** Date the BP joined the team. Annual aggregations only count months
+   *  from this date onwards. NULL is treated as Jan 2026. Postgres DATE
+   *  type, surfaced as `'YYYY-MM-DD'` string. */
+  fecha_ingreso: string | null
   created_at: string
 }
 
@@ -595,6 +599,8 @@ export interface NewBrandPartnerData {
   sueldo_mensual?: number | null
   capacidad_horas_mensual?: number | null
   activo?: boolean
+  /** Postgres DATE — first day of the month the BP joined, e.g. '2026-03-01'. */
+  fecha_ingreso?: string | null
   /** Legacy: if > 0 and no `sueldos_por_mes` is given, seeds 12 sueldo
    * rows all with this value. Superseded by `sueldos_por_mes`. */
   sueldo_base?: number
@@ -790,6 +796,8 @@ export interface UpdateBrandPartnerData {
   sueldo_mensual?: number | null
   capacidad_horas_mensual?: number | null
   activo?: boolean
+  /** Postgres DATE — first day of the month the BP joined, e.g. '2026-03-01'. */
+  fecha_ingreso?: string | null
 }
 
 async function updateRow<T>(

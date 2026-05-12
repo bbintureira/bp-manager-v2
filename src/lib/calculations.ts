@@ -154,6 +154,20 @@ const num = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0
 }
 
+/**
+ * Month (1-12) the BP joined the team. Reads from `fecha_ingreso` —
+ * NULL or unparseable values fall back to January (1), matching the
+ * DB default. Annual aggregations skip months before this so a BP that
+ * joined in March doesn't get charged Jan + Feb capacity.
+ */
+export function getMesIngreso(bp: BrandPartner): number {
+  const fi = bp.fecha_ingreso
+  if (!fi) return 1
+  // 'YYYY-MM-DD' from Postgres DATE — month is the 6th–7th char.
+  const m = Number(fi.slice(5, 7))
+  return Number.isFinite(m) && m >= 1 && m <= 12 ? m : 1
+}
+
 // ---------------------------------------------------------------------------
 // Top-level KPIs
 // ---------------------------------------------------------------------------
@@ -222,8 +236,9 @@ export function calculateBPCosts(
 
 /**
  * Idle hours across the BP roster for the month. For each BP we compute
- * `max(0, 160 - Σ horas en ese mes)` and add them up. BPs missing entirely
- * from `brandPartners` are not counted.
+ * `max(0, capacidad - Σ horas en ese mes)` and add them up. BPs missing
+ * entirely from `brandPartners` are not counted. BPs whose `fecha_ingreso`
+ * is after `mes` contribute 0 idle hours (they weren't on the team yet).
  */
 export function calculateIdleHours(
   brandPartners: BrandPartner[],
@@ -237,8 +252,13 @@ export function calculateIdleHours(
     usedByBp.set(key, (usedByBp.get(key) ?? 0) + num(a.horas))
   }
   return brandPartners.reduce((acc, bp) => {
+    if (mes < getMesIngreso(bp)) return acc
+    const capacidad =
+      bp.capacidad_horas_mensual != null
+        ? num(bp.capacidad_horas_mensual)
+        : HOURS_PER_MONTH
     const used = usedByBp.get(String(bp.id)) ?? 0
-    return acc + Math.max(0, HOURS_PER_MONTH - used)
+    return acc + Math.max(0, capacidad - used)
   }, 0)
 }
 
@@ -424,6 +444,18 @@ export function calculateBPSummary(
   sueldos: Sueldo[],
   mes: number
 ): BPMonthSummary {
+  // Pre-ingreso months: BP wasn't on the team yet, so zero out everything.
+  if (mes < getMesIngreso(bp)) {
+    return {
+      bp,
+      sueldoMensual: 0,
+      totalHoras: 0,
+      numProyectos: 0,
+      utilization: 0,
+      estado: 'neutral',
+    }
+  }
+
   const own = asignaciones.filter(
     (a) => a.mes === mes && same(a.bp_id, bp.id)
   )
@@ -1145,6 +1177,18 @@ export function bpHorasMonthRow(
   proyectos: Proyecto[],
   mes: number
 ): BPHorasMonthRow {
+  // Months before the BP joined contribute zero capacity / hours.
+  if (mes < getMesIngreso(bp)) {
+    return {
+      bp,
+      horasContratadas: 0,
+      horasAsignadas: 0,
+      horasLibres: 0,
+      ocupacion: 0,
+      byProject: [],
+    }
+  }
+
   const horasContratadas =
     bp.capacidad_horas_mensual != null
       ? num(bp.capacidad_horas_mensual)
@@ -1242,6 +1286,19 @@ export function bpRentabilidadMonthRow(
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
   mes: number
 ): BPRentabilidadMonthRow {
+  // Months before the BP joined produce a zero row (no costo, no ingreso).
+  if (mes < getMesIngreso(bp)) {
+    return {
+      bp,
+      sueldoMensual: 0,
+      ingresoCotizado: 0,
+      costo: 0,
+      margen: 0,
+      margenPercent: 0,
+      byProject: [],
+    }
+  }
+
   const sueldoMensual = pickSueldoMensual(bp, sueldos, mes)
   const valorHoraBP = valorHoraBPForMonth(bp, sueldos, mes)
 

@@ -33,6 +33,7 @@ import { seniorityFromSueldo } from '@/lib/seniority'
 import { cn } from '@/lib/utils'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
+const MES_OPTIONS = MONTHS.map((m) => ({ value: m, label: getMonthLabel(m) }))
 
 interface EditBPDialogProps {
   open: boolean
@@ -49,6 +50,16 @@ interface BasicFormState {
   grouper_id: string
   capacidad_horas: string
   activo: 'activo' | 'inactivo'
+  /** 1-12, defaults to January. Persists as `2026-MM-01`. */
+  mes_ingreso: number
+}
+
+const INGRESO_YEAR = 2026
+
+function parseMesIngreso(fecha: string | null | undefined): number {
+  if (!fecha) return 1
+  const m = Number(fecha.slice(5, 7))
+  return Number.isFinite(m) && m >= 1 && m <= 12 ? m : 1
 }
 
 function basicFromBP(bp: BrandPartner | null): BasicFormState {
@@ -60,6 +71,7 @@ function basicFromBP(bp: BrandPartner | null): BasicFormState {
         ? String(bp.capacidad_horas_mensual)
         : '160',
     activo: bp?.activo === false ? 'inactivo' : 'activo',
+    mes_ingreso: parseMesIngreso(bp?.fecha_ingreso),
   }
 }
 
@@ -113,7 +125,8 @@ export function EditBPDialog({
       basic.nombre !== initialBasic.nombre ||
       basic.grouper_id !== initialBasic.grouper_id ||
       basic.capacidad_horas !== initialBasic.capacidad_horas ||
-      basic.activo !== initialBasic.activo,
+      basic.activo !== initialBasic.activo ||
+      basic.mes_ingreso !== initialBasic.mes_ingreso,
     [basic, initialBasic]
   )
 
@@ -175,6 +188,7 @@ export function EditBPDialog({
           capacidad_horas_mensual:
             Number.isFinite(capNum) && capNum > 0 ? capNum : null,
           activo: basic.activo === 'activo',
+          fecha_ingreso: `${INGRESO_YEAR}-${String(basic.mes_ingreso).padStart(2, '0')}-01`,
           // Mirror the avg into the scalar sueldo_mensual.
           ...(promedioMensual > 0
             ? { sueldo_mensual: promedioMensual }
@@ -294,19 +308,44 @@ export function EditBPDialog({
               </Select>
             </Field>
 
-            <Field id="eb-capacidad" label="Capacidad horas / mes">
-              <Input
-                id="eb-capacidad"
-                type="number"
-                inputMode="decimal"
-                min="1"
-                step="1"
-                value={basic.capacidad_horas}
-                onChange={(e) =>
-                  setBasic({ ...basic, capacidad_horas: e.target.value })
-                }
-              />
-            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field id="eb-capacidad" label="Capacidad horas / mes">
+                <Input
+                  id="eb-capacidad"
+                  type="number"
+                  inputMode="decimal"
+                  min="1"
+                  step="1"
+                  value={basic.capacidad_horas}
+                  onChange={(e) =>
+                    setBasic({ ...basic, capacidad_horas: e.target.value })
+                  }
+                />
+              </Field>
+
+              <Field
+                id="eb-mes-ingreso"
+                label={`Mes de ingreso ${INGRESO_YEAR}`}
+                hint="Los cálculos anuales arrancan desde este mes."
+              >
+                <Select
+                  id="eb-mes-ingreso"
+                  value={String(basic.mes_ingreso)}
+                  onChange={(e) =>
+                    setBasic({
+                      ...basic,
+                      mes_ingreso: Number(e.target.value),
+                    })
+                  }
+                >
+                  {MES_OPTIONS.map((o) => (
+                    <option key={o.value} value={String(o.value)}>
+                      {o.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
 
             {/* Section 2 */}
             <SectionTitle className="mt-2">Sueldos mensuales</SectionTitle>
