@@ -168,6 +168,39 @@ export function getMesIngreso(bp: BrandPartner): number {
   return Number.isFinite(m) && m >= 1 && m <= 12 ? m : 1
 }
 
+/**
+ * Last month (1-12) the BP is counted in annual aggregations.
+ *  - Active BPs (`bp.activo` true or null) → 12, no upper bound.
+ *  - Inactive BPs (`bp.activo === false`) → the latest mes that has a
+ *    sueldo row for this BP. With no sueldo history we treat the BP as
+ *    "left immediately after joining" and return `getMesIngreso(bp)`
+ *    so they're counted for exactly one month.
+ *
+ * Pair with `getMesIngreso` to define the BP's [ingreso, egreso] range.
+ */
+export function getMesEgreso(bp: BrandPartner, sueldos: Sueldo[]): number {
+  if (bp.activo !== false) return 12
+  let max = 0
+  for (const s of sueldos) {
+    if (!same(s.bp_id, bp.id)) continue
+    const m = Number(s.mes)
+    if (Number.isFinite(m) && m > max && m <= 12) max = m
+  }
+  return max > 0 ? max : getMesIngreso(bp)
+}
+
+/** True iff `mes` is within the BP's active window
+ *  (inclusive of both ingreso and egreso). */
+function inActiveWindow(
+  bp: BrandPartner,
+  mes: number,
+  sueldos: Sueldo[]
+): boolean {
+  if (mes < getMesIngreso(bp)) return false
+  if (mes > getMesEgreso(bp, sueldos)) return false
+  return true
+}
+
 // ---------------------------------------------------------------------------
 // Top-level KPIs
 // ---------------------------------------------------------------------------
@@ -237,13 +270,15 @@ export function calculateBPCosts(
 /**
  * Idle hours across the BP roster for the month. For each BP we compute
  * `max(0, capacidad - Σ horas en ese mes)` and add them up. BPs missing
- * entirely from `brandPartners` are not counted. BPs whose `fecha_ingreso`
- * is after `mes` contribute 0 idle hours (they weren't on the team yet).
+ * entirely from `brandPartners` are not counted. BPs outside their
+ * `[ingreso, egreso]` window contribute 0 idle hours (they weren't on
+ * the team yet, or already left).
  */
 export function calculateIdleHours(
   brandPartners: BrandPartner[],
   asignaciones: Asignacion[],
-  mes: number
+  mes: number,
+  sueldos: Sueldo[] = []
 ): number {
   const usedByBp = new Map<string, number>()
   for (const a of asignaciones) {
@@ -252,7 +287,7 @@ export function calculateIdleHours(
     usedByBp.set(key, (usedByBp.get(key) ?? 0) + num(a.horas))
   }
   return brandPartners.reduce((acc, bp) => {
-    if (mes < getMesIngreso(bp)) return acc
+    if (!inActiveWindow(bp, mes, sueldos)) return acc
     const capacidad =
       bp.capacidad_horas_mensual != null
         ? num(bp.capacidad_horas_mensual)
@@ -444,8 +479,8 @@ export function calculateBPSummary(
   sueldos: Sueldo[],
   mes: number
 ): BPMonthSummary {
-  // Pre-ingreso months: BP wasn't on the team yet, so zero out everything.
-  if (mes < getMesIngreso(bp)) {
+  // Outside the BP's active window: pre-ingreso or post-egreso → zero row.
+  if (!inActiveWindow(bp, mes, sueldos)) {
     return {
       bp,
       sueldoMensual: 0,
@@ -765,7 +800,7 @@ export function calculateProyectosAnnualKpis(
     0
   )
   const idleHours = MONTHS.reduce(
-    (s, m) => s + calculateIdleHours(brandPartners, asignaciones, m),
+    (s, m) => s + calculateIdleHours(brandPartners, asignaciones, m, sueldos),
     0
   )
   const activeProjects = new Set(
@@ -1175,10 +1210,14 @@ export function bpHorasMonthRow(
   bp: BrandPartner,
   asignaciones: Asignacion[],
   proyectos: Proyecto[],
-  mes: number
+  mes: number,
+  sueldos: Sueldo[] = []
 ): BPHorasMonthRow {
-  // Months before the BP joined contribute zero capacity / hours.
-  if (mes < getMesIngreso(bp)) {
+  // Months outside the BP's active window [ingreso, egreso] contribute
+  // zero capacity / hours. Without sueldos passed in, only the ingreso
+  // bound is checked (active BPs are unaffected; inactives without
+  // history collapse to 1 month).
+  if (!inActiveWindow(bp, mes, sueldos)) {
     return {
       bp,
       horasContratadas: 0,
@@ -1237,12 +1276,13 @@ export interface BPHorasYearRow {
 export function bpHorasYear(
   bp: BrandPartner,
   asignaciones: Asignacion[],
-  proyectos: Proyecto[]
+  proyectos: Proyecto[],
+  sueldos: Sueldo[] = []
 ): BPHorasYearRow {
   return {
     bp,
     byMonth: MONTHS_ALL.map((m) =>
-      bpHorasMonthRow(bp, asignaciones, proyectos, m)
+      bpHorasMonthRow(bp, asignaciones, proyectos, m, sueldos)
     ),
   }
 }
@@ -1286,8 +1326,8 @@ export function bpRentabilidadMonthRow(
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
   mes: number
 ): BPRentabilidadMonthRow {
-  // Months before the BP joined produce a zero row (no costo, no ingreso).
-  if (mes < getMesIngreso(bp)) {
+  // Outside the BP's active window — no costo, no ingreso.
+  if (!inActiveWindow(bp, mes, sueldos)) {
     return {
       bp,
       sueldoMensual: 0,
@@ -1403,9 +1443,10 @@ export interface BPHorasAnnualAggregate {
 export function bpHorasAnnualAggregate(
   bp: BrandPartner,
   asignaciones: Asignacion[],
-  proyectos: Proyecto[]
+  proyectos: Proyecto[],
+  sueldos: Sueldo[] = []
 ): BPHorasAnnualAggregate {
-  const year = bpHorasYear(bp, asignaciones, proyectos)
+  const year = bpHorasYear(bp, asignaciones, proyectos, sueldos)
   const totalContratadas = year.byMonth.reduce(
     (s, m) => s + m.horasContratadas,
     0

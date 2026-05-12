@@ -133,7 +133,13 @@ export function DashboardBrandPartners() {
   const allHorasRows: BPHorasMonthRow[] = useMemo(() => {
     if (!snapshot || view !== 'monthly') return []
     return snapshot.brandPartners.map((bp) =>
-      bpHorasMonthRow(bp, snapshot.asignaciones, snapshot.proyectos, mes)
+      bpHorasMonthRow(
+        bp,
+        snapshot.asignaciones,
+        snapshot.proyectos,
+        mes,
+        snapshot.sueldos
+      )
     )
   }, [snapshot, mes, view])
 
@@ -154,7 +160,12 @@ export function DashboardBrandPartners() {
   const allHorasAnnual: BPHorasAnnualAggregate[] = useMemo(() => {
     if (!snapshot || view !== 'annual') return []
     return snapshot.brandPartners.map((bp) =>
-      bpHorasAnnualAggregate(bp, snapshot.asignaciones, snapshot.proyectos)
+      bpHorasAnnualAggregate(
+        bp,
+        snapshot.asignaciones,
+        snapshot.proyectos,
+        snapshot.sueldos
+      )
     )
   }, [snapshot, view])
 

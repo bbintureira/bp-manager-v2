@@ -111,7 +111,12 @@ export function BPDetailModal({
       ) ?? bp
       setData({
         bp: fresh,
-        horasYear: bpHorasYear(fresh, snap.asignaciones, snap.proyectos),
+        horasYear: bpHorasYear(
+          fresh,
+          snap.asignaciones,
+          snap.proyectos,
+          snap.sueldos
+        ),
         rentaYear: bpRentabilidadYear(
           fresh,
           snap.asignaciones,

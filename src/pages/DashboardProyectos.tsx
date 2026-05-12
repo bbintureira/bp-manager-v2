@@ -143,7 +143,12 @@ function deriveMonthly(snapshot: DashboardSnapshot, mes: number): MonthlyData {
     snapshot,
     revenue,
     costs,
-    idleHours: calculateIdleHours(snapshot.brandPartners, snapshot.asignaciones, mes),
+    idleHours: calculateIdleHours(
+      snapshot.brandPartners,
+      snapshot.asignaciones,
+      mes,
+      snapshot.sueldos
+    ),
     marginPercent: calculateMargin(revenue, costs),
     projectSummaries: summarizeAllProjects(
       snapshot.proyectos,

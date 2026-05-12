@@ -41,6 +41,7 @@ import { StatusBadge } from '@/components/ui/status-badge'
 import { formatCurrency, formatHours, formatNumber, formatPercent } from '@/lib/format'
 import {
   HOURS_PER_MONTH,
+  getMesEgreso,
   getMesIngreso,
   summarizeAllProjectsRentabilidad,
   summarizeBPsAnnual,
@@ -62,6 +63,7 @@ import {
   type BrandPartner,
   type ProjectAsignacionesFullYear,
   type Proyecto,
+  type Sueldo,
 } from '@/lib/queries'
 import { matchesQuery, useSearch } from '@/hooks/useSearch'
 import { displaySeniority } from '@/lib/seniority'
@@ -69,18 +71,23 @@ import { cn } from '@/lib/utils'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
 
-/** Annual capacity for a BP, respecting fecha_ingreso:
- *  `(13 - mesIngreso) × capacidad_mensual`.
- *  Falls back to `12 × HOURS_PER_MONTH` if `bp` is null (caller has no
- *  BP context — e.g. a project row aggregating multiple BPs). */
-function annualHoursForBP(bp: BrandPartner | null | undefined): number {
+/** Annual capacity for a BP, respecting the [mesIngreso, mesEgreso]
+ *  window: `(egreso - ingreso + 1) × capacidad_mensual`. Active BPs
+ *  cover ingreso..12; inactives stop at the last mes that has a
+ *  sueldo row. Falls back to `12 × HOURS_PER_MONTH` if `bp` is null. */
+function annualHoursForBP(
+  bp: BrandPartner | null | undefined,
+  sueldos: Sueldo[] = []
+): number {
   if (!bp) return HOURS_PER_MONTH * 12
   const mesIngreso = getMesIngreso(bp)
+  const mesEgreso = getMesEgreso(bp, sueldos)
+  const months = Math.max(0, mesEgreso - mesIngreso + 1)
   const capacidad =
     bp.capacidad_horas_mensual != null && Number(bp.capacidad_horas_mensual) > 0
       ? Number(bp.capacidad_horas_mensual)
       : HOURS_PER_MONTH
-  return capacidad * (13 - mesIngreso)
+  return capacidad * months
 }
 
 // Both modes use the same edit state shape — the key just means different
@@ -94,6 +101,10 @@ type Mode = 'all' | 'proyecto' | 'bp'
 export function AsignacionesPage() {
   const [proyectos, setProyectos] = useState<Proyecto[]>([])
   const [brandPartners, setBrandPartners] = useState<BrandPartner[]>([])
+  /** Annual sueldos cache — needed to compute mesEgreso for inactive BPs
+   *  so the utilization denominators in this page stop at their last
+   *  paid month instead of always running through December. */
+  const [allSueldos, setAllSueldos] = useState<Sueldo[]>([])
 
   // Selection lives in the URL: ?p=<id> for per-project mode, ?bp=<id>
   // for per-BP mode. Both empty → flat all-projects list. Setting one
@@ -253,6 +264,7 @@ export function AsignacionesPage() {
       ])
       setProyectos(ps)
       setBrandPartners(bps)
+      setAllSueldos(sueldos)
       // Show every project — including ones without any asignaciones yet.
       // This is the natural landing point to add BPs to a freshly-created
       // project. Sort by hours desc so the active ones float up; ties
@@ -345,13 +357,13 @@ export function AsignacionesPage() {
     // Available hours: per-BP annual capacity respecting fecha_ingreso,
     // summed across the BPs in the table.
     const availableHoras = bpOrder.reduce(
-      (s, id) => s + annualHoursForBP(bpById.get(id)),
+      (s, id) => s + annualHoursForBP(bpById.get(id), allSueldos),
       0
     )
     const avgUtilization =
       availableHoras === 0 ? 0 : (totalHoras / availableHoras) * 100
     return { totalHoras, numBps, avgUtilization, availableHoras }
-  }, [bpOrder, edits, brandPartners])
+  }, [bpOrder, edits, brandPartners, allSueldos])
 
   // ----- derived (per-project "all" mode)
   const visibleAllRows = useMemo(() => {
@@ -502,11 +514,11 @@ export function AsignacionesPage() {
     const numProyectos = totals.filter((t) => t > 0).length
     // The BP-view is scoped to a single BP (bpData?.bp). Capacity respects
     // their fecha_ingreso instead of a hardcoded 12 × 160.
-    const annualHours = annualHoursForBP(bpData?.bp)
+    const annualHours = annualHoursForBP(bpData?.bp, allSueldos)
     const utilization =
       annualHours === 0 ? 0 : (totalHoras / annualHours) * 100
     return { totalHoras, numProyectos, utilization, annualHours }
-  }, [proyectoOrder, bpEdits, bpData])
+  }, [proyectoOrder, bpEdits, bpData, allSueldos])
 
   const setBpCell = useCallback((proyecto_id: string, idx: number, raw: string) => {
     setBpEdits((prev) => {
@@ -804,7 +816,8 @@ export function AsignacionesPage() {
                 }}
                 annualHoursForRow={(id) =>
                   annualHoursForBP(
-                    brandPartners.find((b) => String(b.id) === id) ?? null
+                    brandPartners.find((b) => String(b.id) === id) ?? null,
+                    allSueldos
                   )
                 }
                 onCell={setCell}
