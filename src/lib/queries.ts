@@ -348,30 +348,51 @@ export interface ProjectDetailData {
   sueldos: Sueldo[]
   horasContratadas: HorasContratadas[]
   brandPartners: BrandPartner[]
+  /** Length-12 array of `{ mes, honorarios }` for this project — the
+   *  source of truth for revenue. Months without a row are returned as
+   *  `{ mes, honorarios: 0 }`. */
+  honorariosMensuales: { mes: number; honorarios: number }[]
 }
 
 /** Everything we need to render the project detail modal. */
 export async function getProjectDetail(proyecto_id: Id): Promise<ProjectDetailData> {
-  const [proyecto, asignaciones, sueldos, horasContratadas, brandPartners] =
-    await Promise.all([
-      (async () => {
-        const { data, error } = await supabase
-          .from('proyectos')
-          .select('*')
-          .eq('id', proyecto_id)
-          .maybeSingle<Proyecto>()
-        if (error) {
-          logQueryError('getProjectDetail.proyecto', error)
-          return null
-        }
-        return data ?? null
-      })(),
-      getAsignacionesByProyecto(proyecto_id),
-      getSueldos(),
-      getHorasContratadas(proyecto_id),
-      getBrandPartners(),
-    ])
-  return { proyecto, asignaciones, sueldos, horasContratadas, brandPartners }
+  const [
+    proyecto,
+    asignaciones,
+    sueldos,
+    horasContratadas,
+    brandPartners,
+    honorariosMensuales,
+  ] = await Promise.all([
+    (async () => {
+      const { data, error } = await supabase
+        .from('proyectos')
+        .select('*')
+        .eq('id', proyecto_id)
+        .maybeSingle<Proyecto>()
+      if (error) {
+        logQueryError('getProjectDetail.proyecto', error)
+        return null
+      }
+      return data ?? null
+    })(),
+    getAsignacionesByProyecto(proyecto_id),
+    getSueldos(),
+    getHorasContratadas(proyecto_id),
+    getBrandPartners(),
+    getProjectHonorarioFullYear(proyecto_id),
+  ])
+  return {
+    proyecto,
+    asignaciones,
+    sueldos,
+    horasContratadas,
+    brandPartners,
+    honorariosMensuales: honorariosMensuales.map((h) => ({
+      mes: h.mes,
+      honorarios: h.honorarios,
+    })),
+  }
 }
 
 export interface BPDetailData {
@@ -413,15 +434,20 @@ export async function getProjectDetailFull(
     proyecto,
     detail.asignaciones,
     detail.brandPartners,
-    detail.sueldos
+    detail.sueldos,
+    detail.honorariosMensuales
   )
   const totalHoras = bps.reduce((s, x) => s + x.totalHoras, 0)
-  const ratePerHour = Number(proyecto.honorarios_cotizador) / 160
-  const totalRevenue = totalHoras * ratePerHour
-  // Cost = sum of full sueldos for any BP that touched the project (per spec
-  // for project margin in earlier phases — caveat: overstates if a BP also
-  // works on other projects).
-  const totalCost = bps.reduce((s, x) => s + x.totalSueldo, 0)
+  // Booked revenue: sum of all honorarios cargados in `proyecto_honorarios_mensuales`.
+  // This is the actual contracted income, regardless of hours worked.
+  const totalRevenue = detail.honorariosMensuales.reduce(
+    (s, h) => s + Number(h.honorarios || 0),
+    0
+  )
+  // Cost = sum of each BP's costosAnuales (which is computed per-month
+  // from sueldos × hours worked on the project). This is more accurate
+  // than summing full sueldos — matches the per-BP rows in the chart.
+  const totalCost = bps.reduce((s, x) => s + x.costosAnuales, 0)
   const marginPercent = totalRevenue > 0
     ? ((totalRevenue - totalCost) / totalRevenue) * 100
     : 0
