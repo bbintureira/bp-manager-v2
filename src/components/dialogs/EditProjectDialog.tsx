@@ -20,7 +20,9 @@ import { getMonthLabel } from '@/components/ui/month-picker'
 import { TIPO_OPTIONS } from '@/components/dialogs/NewProjectDialog'
 import {
   getProjectHonorarioFullYear,
+  getProjectHorasFullYear,
   updateProjectHonorarioFullYear,
+  updateProjectHorasFullYear,
   updateProyecto,
   type Proyecto,
 } from '@/lib/queries'
@@ -62,7 +64,6 @@ interface EditProjectDialogProps {
 interface BasicFormState {
   nombre: string
   tipo: string
-  horas_requeridas: string
   fecha_inicio: string
   status: string
 }
@@ -71,10 +72,6 @@ function basicFromProyecto(p: Proyecto | null): BasicFormState {
   return {
     nombre: p?.nombre ?? '',
     tipo: p?.tipo ?? 'Always On',
-    horas_requeridas:
-      p?.horas_requeridas_mensual != null
-        ? String(p.horas_requeridas_mensual)
-        : '160',
     fecha_inicio: p?.fecha_inicio ?? '',
     status: p?.status ?? 'activo',
   }
@@ -103,6 +100,12 @@ export function EditProjectDialog({
   )
   const [loadingHonorarios, setLoadingHonorarios] = useState(false)
 
+  // ----- Section 3: monthly required hours (horas_proyecto)
+  const [horas, setHoras] = useState<number[]>(() => new Array(12).fill(0))
+  const [initialHoras, setInitialHoras] = useState<number[] | null>(null)
+  const [loadingHoras, setLoadingHoras] = useState(false)
+  const [horasFillAll, setHorasFillAll] = useState('')
+
   const [submitting, setSubmitting] = useState(false)
 
   // Inflation widget
@@ -120,14 +123,35 @@ export function EditProjectDialog({
     setInflationQuarter('T1')
     setLoadingHonorarios(true)
     setInitialHonorarios(null)
+    setLoadingHoras(true)
+    setInitialHoras(null)
+    setHorasFillAll('')
     let cancelled = false
     void (async () => {
-      const rows = await getProjectHonorarioFullYear(proyecto.id)
+      const [honRows, horasRows] = await Promise.all([
+        getProjectHonorarioFullYear(proyecto.id),
+        getProjectHorasFullYear(proyecto.id),
+      ])
       if (cancelled) return
-      const arr = rows.map((r) => r.honorarios)
-      setHonorarios(arr)
-      setInitialHonorarios(arr.slice())
+      const honArr = honRows.map((r) => r.honorarios)
+      setHonorarios(honArr)
+      setInitialHonorarios(honArr.slice())
       setLoadingHonorarios(false)
+
+      // Horas pre-fill rule: if no row has horas > 0 in the per-month
+      // table yet, seed all 12 cells with the legacy scalar so the user
+      // sees a sensible starting point instead of a wall of zeros.
+      const horasArr = horasRows.map((r) => r.horas)
+      const allZero = horasArr.every((v) => v <= 0)
+      const seeded =
+        allZero && proyecto.horas_requeridas_mensual != null
+          ? new Array(12).fill(Number(proyecto.horas_requeridas_mensual))
+          : horasArr
+      setHoras(seeded)
+      // initialHoras tracks the *persisted* state so the diff highlights
+      // the seeded values as edits if the user saves.
+      setInitialHoras(horasArr.slice())
+      setLoadingHoras(false)
     })()
     return () => {
       cancelled = true
@@ -139,13 +163,11 @@ export function EditProjectDialog({
     () =>
       basic.nombre !== initialBasic.nombre ||
       basic.tipo !== initialBasic.tipo ||
-      basic.horas_requeridas !== initialBasic.horas_requeridas ||
       basic.fecha_inicio !== initialBasic.fecha_inicio ||
       basic.status !== initialBasic.status,
     [basic, initialBasic]
   )
 
-  const horasReqNum = Number(basic.horas_requeridas)
   // Average of monthly honorarios — used for the live "valor / h" preview
   // and (on save) cached into proyecto.precio_mensual so legacy code that
   // still reads the scalar stays consistent.
@@ -155,9 +177,13 @@ export function EditProjectDialog({
     honorariosMesesConValor === 0
       ? 0
       : honorariosTotal / honorariosMesesConValor
+  const horasMesesConValor = horas.filter((v) => v > 0).length
+  const horasTotal = horas.reduce((s, v) => s + v, 0)
+  const horasPromedio =
+    horasMesesConValor === 0 ? 0 : horasTotal / horasMesesConValor
   const valorHora =
-    precioPromedio > 0 && Number.isFinite(horasReqNum) && horasReqNum > 0
-      ? precioPromedio / horasReqNum
+    precioPromedio > 0 && horasPromedio > 0
+      ? precioPromedio / horasPromedio
       : null
 
   const honorariosDirty = useMemo(() => {
@@ -165,7 +191,12 @@ export function EditProjectDialog({
     return honorarios.some((v, i) => v !== initialHonorarios[i])
   }, [honorarios, initialHonorarios])
 
-  const dirty = basicDirty || honorariosDirty
+  const horasDirty = useMemo(() => {
+    if (!initialHoras) return false
+    return horas.some((v, i) => v !== initialHoras[i])
+  }, [horas, initialHoras])
+
+  const dirty = basicDirty || honorariosDirty || horasDirty
 
   const valid =
     basic.nombre.trim().length > 0 && basic.status.length > 0
@@ -195,9 +226,25 @@ export function EditProjectDialog({
     })
   }
 
+  function setHorasMonth(i: number, raw: string) {
+    setHoras((prev) => {
+      const next = prev.slice()
+      const parsed = Number(raw)
+      next[i] = Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+      return next
+    })
+  }
+
+  function applyHorasFillAll() {
+    const v = Number(horasFillAll)
+    if (!Number.isFinite(v) || v < 0) return
+    setHoras(new Array(12).fill(v))
+  }
+
   function resetChanges() {
     setBasic(initialBasic)
     if (initialHonorarios) setHonorarios(initialHonorarios.slice())
+    if (initialHoras) setHoras(initialHoras.slice())
   }
 
   async function onSubmit(e: FormEvent) {
@@ -205,12 +252,14 @@ export function EditProjectDialog({
     if (!proyecto || !valid || !dirty || submitting) return
     setSubmitting(true)
 
-    // Run both updates in parallel; collect partial failures.
+    // Run all updates in parallel; collect partial failures.
     const tasks: Promise<{ kind: string; ok: boolean; error?: string }>[] = []
     // When honorarios change, refresh the cached scalar precio_mensual +
     // legacy honorarios_cotizador so any code path that still reads them
-    // stays in lockstep with the monthly source of truth.
-    const refreshScalars = honorariosDirty
+    // stays in lockstep with the monthly source of truth. Same with
+    // horas: keep the scalar `horas_requeridas_mensual` synced to the
+    // average so old callers still work.
+    const refreshHonorariosScalars = honorariosDirty
       ? precioPromedio > 0
         ? {
             honorarios_cotizador: precioPromedio,
@@ -218,23 +267,25 @@ export function EditProjectDialog({
           }
         : { honorarios_cotizador: 0, precio_mensual: null }
       : null
+    const refreshHorasScalar = horasDirty
+      ? horasPromedio > 0
+        ? { horas_requeridas_mensual: horasPromedio }
+        : { horas_requeridas_mensual: null }
+      : null
 
-    if (basicDirty || refreshScalars) {
+    if (basicDirty || refreshHonorariosScalars || refreshHorasScalar) {
       tasks.push(
         updateProyecto(proyecto.id, {
           ...(basicDirty
             ? {
                 nombre: basic.nombre.trim(),
                 tipo: basic.tipo.trim() || null,
-                horas_requeridas_mensual:
-                  Number.isFinite(horasReqNum) && horasReqNum > 0
-                    ? horasReqNum
-                    : null,
                 fecha_inicio: basic.fecha_inicio || null,
                 status: basic.status,
               }
             : {}),
-          ...(refreshScalars ?? {}),
+          ...(refreshHonorariosScalars ?? {}),
+          ...(refreshHorasScalar ?? {}),
         }).then((r) => ({
           kind: 'datos básicos',
           ok: r.success,
@@ -249,6 +300,18 @@ export function EditProjectDialog({
           MONTHS.map((mes, i) => ({ mes, honorarios: honorarios[i] }))
         ).then((r) => ({
           kind: 'honorarios mensuales',
+          ok: r.success,
+          error: r.success ? undefined : r.error,
+        }))
+      )
+    }
+    if (horasDirty) {
+      tasks.push(
+        updateProjectHorasFullYear(
+          proyecto.id,
+          MONTHS.map((mes, i) => ({ mes, horas: horas[i] }))
+        ).then((r) => ({
+          kind: 'horas mensuales',
           ok: r.success,
           error: r.success ? undefined : r.error,
         }))
@@ -343,31 +406,14 @@ export function EditProjectDialog({
               </Field>
             </div>
 
-            <Field
-              id="ep-horas-req"
-              label="Horas requeridas / mes"
-              required
-              hint="El precio se carga abajo, mes a mes, en honorarios."
-            >
-              <Input
-                id="ep-horas-req"
-                type="number"
-                inputMode="decimal"
-                min="1"
-                step="1"
-                value={basic.horas_requeridas}
-                onChange={(e) =>
-                  setBasic({ ...basic, horas_requeridas: e.target.value })
-                }
-                required
-              />
-            </Field>
-
             {valorHora !== null && valorHora > 0 && (
-              <div className="text-2xs text-tertiary -mt-2">
+              <div className="text-2xs text-tertiary">
                 Valor / h proyecto (promedio):{' '}
                 <span className="font-mono font-medium text-secondary">
                   ${valorHora.toFixed(2)}
+                </span>{' '}
+                <span className="text-tertiary">
+                  · honorarios y horas se cargan abajo, mes a mes
                 </span>
               </div>
             )}
@@ -493,6 +539,79 @@ export function EditProjectDialog({
                       <span className="text-2xs text-tertiary text-right">
                         {QUARTER_FOR_MONTH[i]}
                       </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Section 3: monthly required hours */}
+            <SectionTitle className="mt-2">Horas por mes</SectionTitle>
+
+            <div className="bg-base border border-border rounded-lg p-3 grid grid-cols-[1fr_auto] gap-2 items-center">
+              <Field id="ep-horas-fill" label="Llenar todos los meses con">
+                <Input
+                  id="ep-horas-fill"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="1"
+                  placeholder="160"
+                  value={horasFillAll}
+                  onChange={(e) => setHorasFillAll(e.target.value)}
+                  disabled={loadingHoras}
+                />
+              </Field>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={applyHorasFillAll}
+                disabled={
+                  loadingHoras ||
+                  horasFillAll.length === 0 ||
+                  !Number.isFinite(Number(horasFillAll))
+                }
+              >
+                Aplicar
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-[100px_1fr] gap-3 px-2 pt-1">
+              <span className="text-2xs font-medium uppercase tracking-wider text-tertiary">
+                Mes
+              </span>
+              <span className="text-2xs font-medium uppercase tracking-wider text-tertiary">
+                Horas requeridas
+              </span>
+            </div>
+
+            {loadingHoras || !initialHoras ? (
+              <TableSkeleton rows={6} />
+            ) : (
+              <div className="flex flex-col">
+                {MONTHS.map((mes, i) => {
+                  const v = horas[i]
+                  const changed = initialHoras && v !== initialHoras[i]
+                  return (
+                    <div
+                      key={mes}
+                      className={cn(
+                        'grid grid-cols-[100px_1fr] gap-3 items-center px-2 py-1.5 border-b border-border last:border-0',
+                        changed && 'bg-accent-soft/40'
+                      )}
+                    >
+                      <span className="text-sm font-medium">
+                        {getMonthLabel(mes)}
+                      </span>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="1"
+                        value={Number.isFinite(v) ? v : 0}
+                        onChange={(e) => setHorasMonth(i, e.target.value)}
+                      />
                     </div>
                   )
                 })}

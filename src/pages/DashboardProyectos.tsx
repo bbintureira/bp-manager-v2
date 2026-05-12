@@ -156,7 +156,8 @@ function deriveMonthly(snapshot: DashboardSnapshot, mes: number): MonthlyData {
       snapshot.sueldos,
       mes,
       snapshot.brandPartners,
-      snapshot.honorariosMensuales
+      snapshot.honorariosMensuales,
+      snapshot.horasMensuales
     ),
     rentabilidad,
   }
@@ -185,7 +186,8 @@ function deriveAnnual(snapshot: AnnualSnapshot): AnnualData {
       snapshot.asignaciones,
       snapshot.sueldos,
       snapshot.brandPartners,
-      snapshot.honorariosMensuales
+      snapshot.honorariosMensuales,
+      snapshot.horasMensuales
     ),
     rentabilidad,
   }

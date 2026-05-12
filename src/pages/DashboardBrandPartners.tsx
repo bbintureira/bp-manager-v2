@@ -152,7 +152,8 @@ export function DashboardBrandPartners() {
         snapshot.sueldos,
         snapshot.proyectos,
         snapshot.honorariosMensuales,
-        mes
+        mes,
+        snapshot.horasMensuales
       )
     )
   }, [snapshot, mes, view])
@@ -177,7 +178,8 @@ export function DashboardBrandPartners() {
         snapshot.asignaciones,
         snapshot.sueldos,
         snapshot.proyectos,
-        snapshot.honorariosMensuales
+        snapshot.honorariosMensuales,
+        snapshot.horasMensuales
       )
     )
   }, [snapshot, view])

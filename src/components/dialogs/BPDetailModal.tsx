@@ -122,7 +122,8 @@ export function BPDetailModal({
           snap.asignaciones,
           snap.sueldos,
           snap.proyectos,
-          snap.honorariosMensuales
+          snap.honorariosMensuales,
+          snap.horasMensuales
         ),
       })
       setLoading(false)

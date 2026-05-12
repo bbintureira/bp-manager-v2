@@ -399,7 +399,8 @@ export function calculateProjectMargin(
   _sueldos: Sueldo[],
   mes: number,
   brandPartners?: BrandPartner[],
-  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[]
+  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[],
+  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[]
 ): ProjectMonthSummary {
   void _sueldos
   const own = asignaciones.filter(
@@ -409,13 +410,13 @@ export function calculateProjectMargin(
   const bpIds = Array.from(new Set(own.map((a) => String(a.bp_id))))
   const bps = bpIds.length
 
-  // Effective project rate from the booked honorarios for this month
-  // (honorarios / horas_requeridas). Falls back to the legacy scalar only
-  // when no monthly row is provided at all.
+  // Effective project rate: honorarios[mes] / horas[mes] from the
+  // per-month tables, with scalar fallbacks.
   const projectRate = valorHoraProyectoForMonth(
     proyecto,
     honorariosMensuales ?? [],
-    mes
+    mes,
+    horasMensuales ?? []
   )
 
   // Per-BP rate via the profitability model (sueldo / capacidad).
@@ -479,7 +480,8 @@ export function summarizeAllProjects(
   sueldos: Sueldo[],
   mes: number,
   brandPartners?: BrandPartner[],
-  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[]
+  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[],
+  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[]
 ): ProjectMonthSummary[] {
   return proyectos.map((p) =>
     calculateProjectMargin(
@@ -488,7 +490,8 @@ export function summarizeAllProjects(
       sueldos,
       mes,
       brandPartners,
-      honorariosMensuales
+      honorariosMensuales,
+      horasMensuales
     )
   )
 }
@@ -727,7 +730,8 @@ export function summarizeProjectsAnnual(
   asignaciones: Asignacion[],
   sueldos: Sueldo[],
   brandPartners?: BrandPartner[],
-  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[]
+  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[],
+  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[]
 ): ProjectAnnualSummary[] {
   return proyectos.map((p) => {
     const byMonth = MONTHS.map((m) =>
@@ -737,7 +741,8 @@ export function summarizeProjectsAnnual(
         sueldos,
         m,
         brandPartners,
-        honorariosMensuales
+        honorariosMensuales,
+        horasMensuales
       )
     )
     const revenue = byMonth.reduce((s, x) => s + x.revenue, 0)
@@ -923,26 +928,37 @@ export function buildBPsForProject(
   asignaciones: Asignacion[],
   brandPartners: BrandPartner[],
   sueldos: Sueldo[],
-  honorariosMensuales: { mes: number; honorarios: number }[] = []
+  honorariosMensuales: { mes: number; honorarios: number }[] = [],
+  horasMensuales: { mes: number; horas: number }[] = []
 ): ProjectBPBreakdown[] {
   const own = asignaciones.filter((a) => same(a.proyecto_id, proyecto.id))
   const totalProject = own.reduce((s, a) => s + num(a.horas), 0)
   const bpMap = new Map(brandPartners.map((b) => [String(b.id), b]))
 
-  // Project's contractual rate per month: honorarios[m] / horas_requeridas.
-  const horasRequeridas =
+  // Project's contractual rate per month: honorarios[m] / horas[m] —
+  // per-month horas come from `horas_proyecto` (or fall back to scalar).
+  const horasScalar =
     proyecto.horas_requeridas_mensual != null &&
     num(proyecto.horas_requeridas_mensual) > 0
       ? num(proyecto.horas_requeridas_mensual)
       : HOURS_PER_MONTH
+  const horasReqPorMes = new Array(12).fill(0) as number[]
+  for (let i = 0; i < 12; i++) horasReqPorMes[i] = horasScalar
+  for (const h of horasMensuales) {
+    const idx = h.mes - 1
+    if (idx >= 0 && idx < 12 && num(h.horas) > 0) {
+      horasReqPorMes[idx] = num(h.horas)
+    }
+  }
   const honorariosPorMes = new Array(12).fill(0) as number[]
   for (const h of honorariosMensuales) {
     const idx = h.mes - 1
     if (idx >= 0 && idx < 12) honorariosPorMes[idx] = num(h.honorarios)
   }
-  const ratePerHourProyectoPorMes = honorariosPorMes.map((hon) =>
-    hon > 0 ? hon / horasRequeridas : 0
-  )
+  const ratePerHourProyectoPorMes = honorariosPorMes.map((hon, i) => {
+    const hr = horasReqPorMes[i]
+    return hon > 0 && hr > 0 ? hon / hr : 0
+  })
   // Single "project rate" shown in the row: avg of months with booked
   // honorarios. Falls back to the deprecated scalar only if nothing was
   // loaded into the monthly grid.
@@ -1216,20 +1232,32 @@ function valorHoraBPForMonth(
   return sueldo / cap
 }
 
-/** Per-month project hourly value with fallback. */
+/** Per-month project hourly value with fallback.
+ *
+ * - `precio` prefers the booked honorario row for that mes, falls back
+ *   to the cached `proyecto.precio_mensual` scalar.
+ * - `horas` prefers the per-month row from `horas_proyecto` (passed in
+ *   via `horasMensuales`), falls back to the scalar
+ *   `proyecto.horas_requeridas_mensual`, then to 160. */
 function valorHoraProyectoForMonth(
   proyecto: Proyecto,
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
-  mes: number
+  mes: number,
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = []
 ): number {
   const hRow = honorariosMensuales.find(
     (h) => h.mes === mes && same(h.proyecto_id, proyecto.id)
   )
   const precio = hRow ? num(hRow.honorarios) : num(proyecto.precio_mensual)
+  const horasRow = horasMensuales.find(
+    (h) => h.mes === mes && same(h.proyecto_id, proyecto.id)
+  )
   const horas =
-    proyecto.horas_requeridas_mensual != null
-      ? num(proyecto.horas_requeridas_mensual)
-      : HOURS_PER_MONTH
+    horasRow && num(horasRow.horas) > 0
+      ? num(horasRow.horas)
+      : proyecto.horas_requeridas_mensual != null
+        ? num(proyecto.horas_requeridas_mensual)
+        : HOURS_PER_MONTH
   if (precio <= 0 || horas <= 0) return 0
   return precio / horas
 }
@@ -1376,7 +1404,8 @@ export function bpRentabilidadMonthRow(
   sueldos: Sueldo[],
   proyectos: Proyecto[],
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
-  mes: number
+  mes: number,
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = []
 ): BPRentabilidadMonthRow {
   // Outside the BP's active window — no costo, no ingreso.
   if (!inActiveWindow(bp, mes, sueldos)) {
@@ -1414,7 +1443,12 @@ export function bpRentabilidadMonthRow(
 
   const byProject: BPProjectRentabilidadRow[] = Array.from(byProjMap.values())
     .map(({ proyecto, horas }) => {
-      const vhp = valorHoraProyectoForMonth(proyecto, honorariosMensuales, mes)
+      const vhp = valorHoraProyectoForMonth(
+        proyecto,
+        honorariosMensuales,
+        mes,
+        horasMensuales
+      )
       const ingreso = vhp * horas
       const costo = valorHoraBP * horas
       return {
@@ -1463,7 +1497,8 @@ export function bpRentabilidadYear(
   asignaciones: Asignacion[],
   sueldos: Sueldo[],
   proyectos: Proyecto[],
-  honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[]
+  honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = []
 ): BPRentabilidadYearRow {
   return {
     bp,
@@ -1474,7 +1509,8 @@ export function bpRentabilidadYear(
         sueldos,
         proyectos,
         honorariosMensuales,
-        m
+        m,
+        horasMensuales
       )
     ),
   }
@@ -1567,14 +1603,16 @@ export function bpRentabilidadAnnualAggregate(
   asignaciones: Asignacion[],
   sueldos: Sueldo[],
   proyectos: Proyecto[],
-  honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[]
+  honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = []
 ): BPRentabilidadAnnualAggregate {
   const year = bpRentabilidadYear(
     bp,
     asignaciones,
     sueldos,
     proyectos,
-    honorariosMensuales
+    honorariosMensuales,
+    horasMensuales
   )
   const totalIngreso = year.byMonth.reduce((s, m) => s + m.ingresoCotizado, 0)
   const totalCosto = year.byMonth.reduce((s, m) => s + m.costo, 0)

@@ -181,18 +181,36 @@ export interface DashboardSnapshot {
   /** Per-project per-month booked honorarios. Used for "billed revenue"
    * KPIs, independent of whether anyone actually worked the hours. */
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[]
+  /** Per-project per-month required hours — denominator for valor/h proy.
+   *  Months without a row come back missing here; callers fall back to
+   *  `proyecto.horas_requeridas_mensual` then to 160. */
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[]
 }
 
 export async function getDashboardSnapshot(mes: number): Promise<DashboardSnapshot> {
-  const [proyectos, brandPartners, asignaciones, sueldos, honorariosMensuales] =
-    await Promise.all([
-      getProyectos(),
-      getBrandPartners(),
-      getAsignaciones(mes),
-      getSueldos(mes),
-      getProyectoHonorariosMensualesAll(),
-    ])
-  return { proyectos, brandPartners, asignaciones, sueldos, honorariosMensuales }
+  const [
+    proyectos,
+    brandPartners,
+    asignaciones,
+    sueldos,
+    honorariosMensuales,
+    horasMensuales,
+  ] = await Promise.all([
+    getProyectos(),
+    getBrandPartners(),
+    getAsignaciones(mes),
+    getSueldos(mes),
+    getProyectoHonorariosMensualesAll(),
+    getProyectoHorasMensualesAll(),
+  ])
+  return {
+    proyectos,
+    brandPartners,
+    asignaciones,
+    sueldos,
+    honorariosMensuales,
+    horasMensuales,
+  }
 }
 
 /** Fetches every row from `proyecto_honorarios_mensuales` in one call.
@@ -344,19 +362,34 @@ export interface AnnualSnapshot {
   asignaciones: Asignacion[]
   sueldos: Sueldo[]
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[]
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[]
 }
 
 /** Same shape as DashboardSnapshot but with no `mes` filter — all months. */
 export async function getAnnualSnapshot(): Promise<AnnualSnapshot> {
-  const [proyectos, brandPartners, asignaciones, sueldos, honorariosMensuales] =
-    await Promise.all([
-      getProyectos(),
-      getBrandPartners(),
-      getAsignaciones(),
-      getSueldos(),
-      getProyectoHonorariosMensualesAll(),
-    ])
-  return { proyectos, brandPartners, asignaciones, sueldos, honorariosMensuales }
+  const [
+    proyectos,
+    brandPartners,
+    asignaciones,
+    sueldos,
+    honorariosMensuales,
+    horasMensuales,
+  ] = await Promise.all([
+    getProyectos(),
+    getBrandPartners(),
+    getAsignaciones(),
+    getSueldos(),
+    getProyectoHonorariosMensualesAll(),
+    getProyectoHorasMensualesAll(),
+  ])
+  return {
+    proyectos,
+    brandPartners,
+    asignaciones,
+    sueldos,
+    honorariosMensuales,
+    horasMensuales,
+  }
 }
 
 export interface ProjectDetailData {
@@ -369,6 +402,9 @@ export interface ProjectDetailData {
    *  source of truth for revenue. Months without a row are returned as
    *  `{ mes, honorarios: 0 }`. */
   honorariosMensuales: { mes: number; honorarios: number }[]
+  /** Length-12 array of `{ mes, horas }` — required hours per month.
+   *  Months without a row come back as `{ mes, horas: 0 }`. */
+  horasMensuales: { mes: number; horas: number }[]
 }
 
 /** Everything we need to render the project detail modal. */
@@ -380,6 +416,7 @@ export async function getProjectDetail(proyecto_id: Id): Promise<ProjectDetailDa
     horasContratadas,
     brandPartners,
     honorariosMensuales,
+    horasMensuales,
   ] = await Promise.all([
     (async () => {
       const { data, error } = await supabase
@@ -398,6 +435,7 @@ export async function getProjectDetail(proyecto_id: Id): Promise<ProjectDetailDa
     getHorasContratadas(proyecto_id),
     getBrandPartners(),
     getProjectHonorarioFullYear(proyecto_id),
+    getProjectHorasFullYear(proyecto_id),
   ])
   return {
     proyecto,
@@ -409,6 +447,7 @@ export async function getProjectDetail(proyecto_id: Id): Promise<ProjectDetailDa
       mes: h.mes,
       honorarios: h.honorarios,
     })),
+    horasMensuales: horasMensuales.map((h) => ({ mes: h.mes, horas: h.horas })),
   }
 }
 
@@ -432,6 +471,8 @@ export interface ProjectDetailFull {
   bps: ProjectBPBreakdown[]
   /** Per-month booked honorarios for the project (length 12, indexed by mes). */
   honorariosMensuales: { mes: number; honorarios: number }[]
+  /** Per-month required hours for the project (length 12). */
+  horasMensuales: { mes: number; horas: number }[]
 }
 
 export async function getProjectDetailFull(
@@ -448,6 +489,7 @@ export async function getProjectDetailFull(
       marginPercent: 0,
       bps: [],
       honorariosMensuales: [],
+      horasMensuales: [],
     }
   }
   const bps = buildBPsForProject(
@@ -455,7 +497,8 @@ export async function getProjectDetailFull(
     detail.asignaciones,
     detail.brandPartners,
     detail.sueldos,
-    detail.honorariosMensuales
+    detail.honorariosMensuales,
+    detail.horasMensuales
   )
   const totalHoras = bps.reduce((s, x) => s + x.totalHoras, 0)
   // Booked revenue: sum of all honorarios cargados in `proyecto_honorarios_mensuales`.
@@ -479,6 +522,7 @@ export async function getProjectDetailFull(
     marginPercent,
     bps,
     honorariosMensuales: detail.honorariosMensuales,
+    horasMensuales: detail.horasMensuales,
   }
 }
 
@@ -1179,6 +1223,21 @@ export interface MonthlyHonorario {
   id?: Id
 }
 
+export interface MonthlyHorasProyecto {
+  mes: number
+  horas: number
+  /** Present when the row already exists in horas_proyecto. */
+  id?: Id
+}
+
+export interface ProyectoHorasMensual {
+  id: Id
+  proyecto_id: Id
+  mes: number
+  horas: number
+  created_at?: string
+}
+
 export interface MonthlySueldo {
   mes: number
   sueldo: number
@@ -1221,6 +1280,89 @@ export async function getProjectHonorarioFullYear(
       mes,
       honorarios: r ? r.honorarios : 0,
       id: r?.id,
+    }
+  })
+}
+
+/**
+ * Returns the project's per-month required hours for the full year,
+ * reading from `horas_proyecto`. Months without a row come back as
+ * `{mes, horas: 0}` (no `id`). When the table has no rows yet for this
+ * project the caller can fall back to `proyectos.horas_requeridas_mensual`
+ * as a pre-fill value.
+ */
+export async function getProjectHorasFullYear(
+  proyecto_id: Id
+): Promise<MonthlyHorasProyecto[]> {
+  const { data, error } = await supabase
+    .from('horas_proyecto')
+    .select('id, mes, horas')
+    .eq('proyecto_id', proyecto_id)
+    .order('mes', { ascending: true })
+  if (error) {
+    logQueryError('getProjectHorasFullYear', error)
+    return FULL_YEAR_MONTHS.map((mes) => ({ mes, horas: 0 }))
+  }
+  const rows = (data ?? []).map((row) => {
+    const r = row as { id: Id; mes: unknown; horas: unknown }
+    return {
+      id: r.id,
+      mes: Number(r.mes),
+      horas: Number(r.horas) || 0,
+    }
+  })
+  return FULL_YEAR_MONTHS.map((mes) => {
+    const r = rows.find((x) => x.mes === mes)
+    return {
+      mes,
+      horas: r ? r.horas : 0,
+      id: r?.id,
+    }
+  })
+}
+
+/** Upserts up to 12 horas rows in `horas_proyecto`. Requires a UNIQUE
+ *  constraint on (proyecto_id, mes). */
+export async function updateProjectHorasFullYear(
+  proyecto_id: Id,
+  horasPorMes: { mes: number; horas: number }[]
+): Promise<CreateResult<ProyectoHorasMensual[]>> {
+  const rows = horasPorMes.map((h) => ({
+    proyecto_id,
+    mes: h.mes,
+    horas: Math.max(0, Number(h.horas) || 0),
+  }))
+  const { data, error } = await supabase
+    .from('horas_proyecto')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .upsert(rows as any, { onConflict: 'proyecto_id,mes' })
+    .select()
+  if (error) {
+    logQueryError('updateProjectHorasFullYear', error)
+    return { success: false, error: error.message }
+  }
+  return { success: true, data: (data ?? []) as ProyectoHorasMensual[] }
+}
+
+/** All `horas_proyecto` rows, used by the dashboards. Coerces mes/horas
+ *  to Number defensively (Supabase can surface int as strings depending
+ *  on the column type). */
+async function getProyectoHorasMensualesAll(): Promise<
+  { proyecto_id: Id; mes: number; horas: number }[]
+> {
+  const { data, error } = await supabase
+    .from('horas_proyecto')
+    .select('proyecto_id, mes, horas')
+  if (error) {
+    logQueryError('getProyectoHorasMensualesAll', error)
+    return []
+  }
+  return (data ?? []).map((row) => {
+    const r = row as { proyecto_id: Id; mes: unknown; horas: unknown }
+    return {
+      proyecto_id: r.proyecto_id,
+      mes: Number(r.mes),
+      horas: Number(r.horas) || 0,
     }
   })
 }
