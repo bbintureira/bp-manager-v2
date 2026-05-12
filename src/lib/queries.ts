@@ -192,7 +192,13 @@ export async function getDashboardSnapshot(mes: number): Promise<DashboardSnapsh
 }
 
 /** Fetches every row from `proyecto_honorarios_mensuales` in one call.
- * Used by the dashboards to compute booked revenue. */
+ * Used by the dashboards to compute booked revenue.
+ *
+ * Coerces `mes` and `honorarios` to Number defensively: Supabase's JS
+ * client occasionally surfaces numeric columns as strings depending on
+ * the underlying Postgres type, and a string `mes` silently breaks the
+ * `h.mes === mes` lookups downstream (so the dashboard reads $0 even
+ * though the row exists). */
 async function getProyectoHonorariosMensualesAll(): Promise<
   { proyecto_id: Id; mes: number; honorarios: number }[]
 > {
@@ -203,7 +209,14 @@ async function getProyectoHonorariosMensualesAll(): Promise<
     logQueryError('getProyectoHonorariosMensualesAll', error)
     return []
   }
-  return (data ?? []) as { proyecto_id: Id; mes: number; honorarios: number }[]
+  return (data ?? []).map((row) => {
+    const r = row as { proyecto_id: Id; mes: unknown; honorarios: unknown }
+    return {
+      proyecto_id: r.proyecto_id,
+      mes: Number(r.mes),
+      honorarios: Number(r.honorarios) || 0,
+    }
+  })
 }
 
 // ----- additional helpers -------------------------------------------------
@@ -1180,12 +1193,21 @@ export async function getProjectHonorarioFullYear(
     logQueryError('getProjectHonorarioFullYear', error)
     return FULL_YEAR_MONTHS.map((mes) => ({ mes, honorarios: 0 }))
   }
-  const rows = (data ?? []) as { id: Id; mes: number; honorarios: number }[]
+  // Coerce mes to Number — Supabase can surface int columns as strings,
+  // and a string `mes` silently breaks the `x.mes === mes` lookup below.
+  const rows = (data ?? []).map((row) => {
+    const r = row as { id: Id; mes: unknown; honorarios: unknown }
+    return {
+      id: r.id,
+      mes: Number(r.mes),
+      honorarios: Number(r.honorarios) || 0,
+    }
+  })
   return FULL_YEAR_MONTHS.map((mes) => {
     const r = rows.find((x) => x.mes === mes)
     return {
       mes,
-      honorarios: r ? Number(r.honorarios) : 0,
+      honorarios: r ? r.honorarios : 0,
       id: r?.id,
     }
   })
