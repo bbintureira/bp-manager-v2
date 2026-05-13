@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Pencil, Plus, Settings2, Trash2 } from 'lucide-react'
+import { FileDown, Pencil, Plus, Settings2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/components/layout/app-layout'
@@ -35,6 +35,7 @@ import {
   bpHorasMonthRow,
   bpRentabilidadAnnualAggregate,
   bpRentabilidadMonthRow,
+  bpRentabilidadYear,
   getMesIngreso,
   type BPHorasAnnualAggregate,
   type BPHorasMonthRow,
@@ -53,6 +54,11 @@ import {
 } from '@/lib/queries'
 import { matchesQuery, useSearch } from '@/hooks/useSearch'
 import { displaySeniority } from '@/lib/seniority'
+import {
+  exportBrandPartners,
+  exportBrandPartnersHoras,
+  type BPRentabilidadExportRow,
+} from '@/utils/exportToExcel'
 import { cn } from '@/lib/utils'
 
 const CURRENT_YEAR = new Date().getFullYear()
@@ -403,10 +409,56 @@ export function DashboardBrandPartners() {
           view === 'monthly' ? `${getMonthLabel(mes)} ${CURRENT_YEAR}` : `Año ${CURRENT_YEAR}`
         } · ${tab === 'horas' ? 'Utilización de horas' : 'Rentabilidad en pesos'}`}
         action={
-          <Button onClick={() => setOpenNew(true)}>
-            <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
-            Nuevo BP
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                if (!snapshot) return
+                const rows: BPRentabilidadExportRow[] =
+                  snapshot.brandPartners.map((bp) => {
+                    const year = bpRentabilidadYear(
+                      bp,
+                      snapshot.asignaciones,
+                      snapshot.sueldos,
+                      snapshot.proyectos,
+                      snapshot.honorariosMensuales,
+                      snapshot.horasMensuales
+                    )
+                    return {
+                      bp,
+                      ingresosPorMes: year.byMonth.map((m) => m.ingresoCotizado),
+                      costosPorMes: year.byMonth.map((m) => m.costo),
+                      margenesPorMes: year.byMonth.map((m) => m.margen),
+                    }
+                  })
+                exportBrandPartners(rows)
+              }}
+              disabled={!snapshot || loading}
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              Descargar rentabilidad
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                if (!snapshot) return
+                exportBrandPartnersHoras(
+                  snapshot.brandPartners,
+                  snapshot.asignaciones
+                )
+              }}
+              disabled={!snapshot || loading}
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              Descargar horas
+            </Button>
+            <Button onClick={() => setOpenNew(true)}>
+              <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+              Nuevo BP
+            </Button>
+          </div>
         }
       />
 

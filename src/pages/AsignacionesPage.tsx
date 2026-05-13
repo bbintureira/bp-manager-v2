@@ -6,7 +6,7 @@ import {
   type FormEvent,
 } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { FileDown, Loader2, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/components/layout/app-layout'
@@ -68,6 +68,7 @@ import {
 } from '@/lib/queries'
 import { matchesQuery, useSearch } from '@/hooks/useSearch'
 import { displaySeniority } from '@/lib/seniority'
+import { exportAsignaciones } from '@/utils/exportToExcel'
 import { cn } from '@/lib/utils'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
@@ -710,20 +711,43 @@ export function AsignacionesPage() {
                 : 'Cargando BP…'
         }
         action={
-          isProyecto ? (
-            <Button onClick={() => setAddingOpen(true)} disabled={loading}>
-              <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
-              Agregar BP
-            </Button>
-          ) : isBp ? (
+          <div className="flex items-center gap-2">
             <Button
-              onClick={() => setAddingProyectoOpen(true)}
-              disabled={loading}
+              type="button"
+              variant="secondary"
+              onClick={() =>
+                exportAsignaciones(allAsignaciones, {
+                  proyectos,
+                  brandPartners,
+                  sueldos: allSueldos,
+                  // The page doesn't pre-load these tables; the exporter
+                  // falls back to the scalar precio_mensual /
+                  // horas_requeridas_mensual, which on-save is kept in
+                  // sync with the per-month grids.
+                  honorariosMensuales: [],
+                  horasMensuales: [],
+                })
+              }
+              disabled={loading || allAsignaciones.length === 0}
             >
-              <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
-              Agregar proyecto
+              <FileDown className="w-3.5 h-3.5" />
+              Descargar Excel
             </Button>
-          ) : null
+            {isProyecto ? (
+              <Button onClick={() => setAddingOpen(true)} disabled={loading}>
+                <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                Agregar BP
+              </Button>
+            ) : isBp ? (
+              <Button
+                onClick={() => setAddingProyectoOpen(true)}
+                disabled={loading}
+              >
+                <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+                Agregar proyecto
+              </Button>
+            ) : null}
+          </div>
         }
       />
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Coins, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Coins, FileDown, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Bar,
@@ -76,6 +76,7 @@ import {
   type Proyecto,
 } from '@/lib/queries'
 import { matchesQuery, useSearch } from '@/hooks/useSearch'
+import { exportProyectos, type ProyectoExportRow } from '@/utils/exportToExcel'
 
 // --------------------------------------------------------------------------
 
@@ -327,10 +328,53 @@ export function DashboardProyectos() {
             : `Vista anual · ${CURRENT_YEAR}`
         }
         action={
-          <Button onClick={() => setOpenNew(true)}>
-            <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
-            Nuevo proyecto
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                if (!data) return
+                const honByKey = new Map<string, number>()
+                for (const h of data.snapshot.honorariosMensuales) {
+                  honByKey.set(
+                    `${String(h.proyecto_id)}::${Number(h.mes)}`,
+                    Number(h.honorarios) || 0
+                  )
+                }
+                const horasByKey = new Map<string, number>()
+                for (const h of data.snapshot.horasMensuales) {
+                  horasByKey.set(
+                    `${String(h.proyecto_id)}::${Number(h.mes)}`,
+                    Number(h.horas) || 0
+                  )
+                }
+                const rows: ProyectoExportRow[] = data.snapshot.proyectos.map(
+                  (p) => {
+                    const honorariosPorMes: number[] = []
+                    const horasPorMes: number[] = []
+                    for (let m = 1; m <= 12; m++) {
+                      honorariosPorMes.push(
+                        honByKey.get(`${String(p.id)}::${m}`) ?? 0
+                      )
+                      horasPorMes.push(
+                        horasByKey.get(`${String(p.id)}::${m}`) ?? 0
+                      )
+                    }
+                    return { proyecto: p, honorariosPorMes, horasPorMes }
+                  }
+                )
+                exportProyectos(rows)
+              }}
+              disabled={!data || loading}
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              Descargar Excel
+            </Button>
+            <Button onClick={() => setOpenNew(true)}>
+              <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
+              Nuevo proyecto
+            </Button>
+          </div>
         }
       />
 
