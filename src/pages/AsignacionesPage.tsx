@@ -69,6 +69,8 @@ import {
 import { matchesQuery, useSearch } from '@/hooks/useSearch'
 import { displaySeniority } from '@/lib/seniority'
 import { exportAsignaciones } from '@/utils/exportToExcel'
+import { importAsignaciones } from '@/utils/importFromExcel'
+import { UploadButton } from '@/components/ui/upload-button'
 import { cn } from '@/lib/utils'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
@@ -726,6 +728,18 @@ export function AsignacionesPage() {
               <FileDown className="w-3.5 h-3.5" />
               Descargar Excel
             </Button>
+            <UploadButton
+              label="Subir Excel"
+              onFile={importAsignaciones}
+              onComplete={() => {
+                // Whatever view is active, reload its data so the
+                // freshly-upserted rows show up.
+                if (mode === 'all') void loadAll()
+                else if (mode === 'proyecto') void loadProject(selectedProyectoId)
+                else void loadBp(selectedBpId)
+              }}
+              disabled={loading}
+            />
             {isProyecto ? (
               <Button onClick={() => setAddingOpen(true)} disabled={loading}>
                 <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />

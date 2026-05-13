@@ -77,6 +77,8 @@ import {
 } from '@/lib/queries'
 import { matchesQuery, useSearch } from '@/hooks/useSearch'
 import { exportProyectos, type ProyectoExportRow } from '@/utils/exportToExcel'
+import { importProyectos } from '@/utils/importFromExcel'
+import { UploadButton } from '@/components/ui/upload-button'
 
 // --------------------------------------------------------------------------
 
@@ -382,6 +384,12 @@ export function DashboardProyectos() {
               <FileDown className="w-3.5 h-3.5" />
               Descargar Excel
             </Button>
+            <UploadButton
+              label="Subir Excel"
+              onFile={importProyectos}
+              onComplete={refetch}
+              disabled={loading}
+            />
             <Button onClick={() => setOpenNew(true)}>
               <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
               Nuevo proyecto

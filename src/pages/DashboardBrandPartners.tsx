@@ -59,6 +59,8 @@ import {
   exportBrandPartnersHoras,
   type BPRentabilidadExportRow,
 } from '@/utils/exportToExcel'
+import { importBrandPartners } from '@/utils/importFromExcel'
+import { UploadButton } from '@/components/ui/upload-button'
 import { cn } from '@/lib/utils'
 
 const CURRENT_YEAR = new Date().getFullYear()
@@ -457,6 +459,15 @@ export function DashboardBrandPartners() {
               <FileDown className="w-3.5 h-3.5" />
               Descargar horas
             </Button>
+            <UploadButton
+              label="Subir Excel"
+              onFile={importBrandPartners}
+              onComplete={() => {
+                refetch()
+                void loadGroupers()
+              }}
+              disabled={!snapshot || loading}
+            />
             <Button onClick={() => setOpenNew(true)}>
               <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
               Nuevo BP
