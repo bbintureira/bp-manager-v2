@@ -41,7 +41,6 @@ import { MultiSelect } from '@/components/ui/multi-select'
 import { Section } from '@/components/ui/section'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge, type StatusVariant } from '@/components/ui/status-badge'
-import { UtilizationBar } from '@/components/ui/utilization-bar'
 import { ViewToggle, type ViewMode } from '@/components/ui/view-toggle'
 import {
   formatCompactCurrency,
@@ -85,7 +84,6 @@ import { UploadButton } from '@/components/ui/upload-button'
 
 const CURRENT_YEAR = new Date().getFullYear()
 const defaultMonth = () => new Date().getMonth() + 1
-const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
 
 function statusVariantFor(raw: string | null | undefined): {
   variant: StatusVariant
@@ -642,7 +640,10 @@ export function DashboardProyectos() {
             />
           ) : (
             <DataTable
-              columns={monthlyColumns(setEditingProyecto, setDeletingProyecto)}
+              columns={projectTableColumns<ProjectMonthSummary>(
+                setEditingProyecto,
+                setDeletingProyecto
+              )}
               data={monthlyActive}
               rowKey={(r) => String(r.proyecto.id)}
               onRowClick={(r) => setDetailingProyecto(r.proyecto)}
@@ -658,7 +659,7 @@ export function DashboardProyectos() {
           />
         ) : (
           <DataTable
-            columns={annualColumns(
+            columns={projectTableColumns<ProjectAnnualSummary>(
               setEditingProyecto,
               setDeletingProyecto,
               setHonorariosProyecto
@@ -734,52 +735,38 @@ function RowActions({
   )
 }
 
-function monthlyColumns(
+/** Shared shape between monthly + annual project summaries — both
+ *  expose the fields the simplified table needs. */
+interface ProjectRowLike {
+  proyecto: Proyecto
+  revenue: number
+  cost: number
+  marginAbsolute: number
+}
+
+function projectTableColumns<T extends ProjectRowLike>(
   onEdit: (p: Proyecto) => void,
-  onDelete: (p: Proyecto) => void
-): DataTableColumn<ProjectMonthSummary>[] {
+  onDelete: (p: Proyecto) => void,
+  onHonorarios?: (p: Proyecto) => void
+): DataTableColumn<T>[] {
   return [
     {
       key: 'proyecto',
-      accessor: 'proyecto',
       header: 'Proyecto',
       render: (_v, row) => (
-        <span className="font-medium">{row.proyecto.nombre}</span>
+        <span className="font-medium whitespace-nowrap">
+          {row.proyecto.nombre}
+        </span>
       ),
     },
     {
-      key: 'bps',
-      accessor: 'bps',
-      header: 'BPs',
-      render: (v) => v as number,
-    },
-    {
-      key: 'utilization',
-      accessor: 'utilization',
-      header: 'Utilización',
-      render: (v) => <UtilizationBar value={Math.round(v as number)} />,
-    },
-    {
-      key: 'projectRate',
-      accessor: 'projectRate',
-      header: '$/h proyecto',
-      numeric: true,
-      render: (v) => formatCurrency(v as number, 2),
-    },
-    {
-      key: 'avgBpRate',
-      accessor: 'avgBpRate',
-      header: '$/h BP prom.',
-      numeric: true,
-      render: (v) =>
-        (v as number) > 0 ? formatCurrency(v as number, 2) : '—',
-    },
-    {
-      key: 'marginPercent',
-      accessor: 'marginPercent',
-      header: 'Margen',
-      numeric: true,
-      render: (v) => <MarginCell value={v as number} />,
+      key: 'tipo',
+      header: 'Tipo',
+      render: (_v, row) => (
+        <span className="text-secondary whitespace-nowrap">
+          {row.proyecto.tipo ?? '—'}
+        </span>
+      ),
     },
     {
       key: 'estado',
@@ -790,50 +777,23 @@ function monthlyColumns(
       },
     },
     {
-      key: 'acciones',
-      header: '',
-      render: (_v, row) => (
-        <RowActions
-          onEdit={() => onEdit(row.proyecto)}
-          onDelete={() => onDelete(row.proyecto)}
-        />
-      ),
-    },
-  ]
-}
-
-function annualColumns(
-  onEdit: (p: Proyecto) => void,
-  onDelete: (p: Proyecto) => void,
-  onHonorarios: (p: Proyecto) => void
-): DataTableColumn<ProjectAnnualSummary>[] {
-  const monthCols: DataTableColumn<ProjectAnnualSummary>[] = MONTHS.map((m) => ({
-    key: `mes-${m}`,
-    header: getMonthLabel(m).slice(0, 3),
-    align: 'right',
-    render: (_v, row) => {
-      const data = row.byMonth[m - 1]
-      if (!data || data.bps === 0) return <span className="text-tertiary">—</span>
-      return <MarginCell value={data.marginPercent} compact />
-    },
-  }))
-  return [
-    {
-      key: 'proyecto',
-      accessor: 'proyecto',
-      header: 'Proyecto',
-      render: (_v, row) => (
-        <span className="font-medium whitespace-nowrap">{row.proyecto.nombre}</span>
-      ),
-    },
-    {
-      key: 'marginPercent',
-      accessor: 'marginPercent',
-      header: 'Anual',
+      key: 'ingresos',
+      header: 'Ingresos',
       numeric: true,
-      render: (v) => <MarginCell value={v as number} />,
+      render: (_v, row) => formatCurrency(row.revenue, 0),
     },
-    ...monthCols,
+    {
+      key: 'costo',
+      header: 'Costo',
+      numeric: true,
+      render: (_v, row) => formatCurrency(row.cost, 0),
+    },
+    {
+      key: 'resultado',
+      header: 'Resultado',
+      numeric: true,
+      render: (_v, row) => <ResultCell value={row.marginAbsolute} />,
+    },
     {
       key: 'acciones',
       header: '',
@@ -841,28 +801,32 @@ function annualColumns(
         <RowActions
           onEdit={() => onEdit(row.proyecto)}
           onDelete={() => onDelete(row.proyecto)}
-          onHonorarios={() => onHonorarios(row.proyecto)}
+          onHonorarios={
+            onHonorarios ? () => onHonorarios(row.proyecto) : undefined
+          }
         />
       ),
     },
   ]
 }
 
-function MarginCell({ value, compact }: { value: number; compact?: boolean }) {
+/** Green / red signed currency for Resultado = Ingresos − Costo. */
+function ResultCell({ value }: { value: number }) {
   const color =
-    value > 20
+    value > 0
       ? 'var(--success)'
-      : value > 0
-        ? 'var(--warning)'
-        : 'var(--danger)'
+      : value < 0
+        ? 'var(--danger)'
+        : 'var(--text-secondary)'
   const sign = value > 0 ? '+' : value < 0 ? '−' : ''
   return (
-    <span style={{ color }} className={compact ? 'text-2xs' : undefined}>
+    <span style={{ color }} className="font-mono font-medium">
       {sign}
-      {formatNumber(Math.abs(value), 1)}%
+      {formatCurrency(Math.abs(value), 0).replace(/^[+-]?/, '')}
     </span>
   )
 }
+
 
 function TopBpsList({ summaries }: { summaries: ProjectMonthSummary[] }) {
   const top = summaries.slice(0, 4)

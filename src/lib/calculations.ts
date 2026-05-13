@@ -745,10 +745,12 @@ export function summarizeProjectsAnnual(
         horasMensuales
       )
     )
-    const revenue = byMonth.reduce((s, x) => s + x.revenue, 0)
-    const cost = byMonth.reduce((s, x) => s + x.cost, 0)
-    const totalHoras = byMonth.reduce((s, x) => s + x.totalHoras, 0)
+    // Only sum the months where the project actually has BPs assigned —
+    // empty / future months drop out instead of zero-inflating the totals.
     const months = byMonth.filter((m) => m.bps > 0)
+    const revenue = months.reduce((s, x) => s + x.revenue, 0)
+    const cost = months.reduce((s, x) => s + x.cost, 0)
+    const totalHoras = months.reduce((s, x) => s + x.totalHoras, 0)
     const avgUtilization =
       months.length === 0
         ? 0
