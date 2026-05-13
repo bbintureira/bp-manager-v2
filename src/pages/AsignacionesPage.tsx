@@ -719,13 +719,6 @@ export function AsignacionesPage() {
                 exportAsignaciones(allAsignaciones, {
                   proyectos,
                   brandPartners,
-                  sueldos: allSueldos,
-                  // The page doesn't pre-load these tables; the exporter
-                  // falls back to the scalar precio_mensual /
-                  // horas_requeridas_mensual, which on-save is kept in
-                  // sync with the per-month grids.
-                  honorariosMensuales: [],
-                  horasMensuales: [],
                 })
               }
               disabled={loading || allAsignaciones.length === 0}

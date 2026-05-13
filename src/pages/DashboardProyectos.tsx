@@ -335,14 +335,14 @@ export function DashboardProyectos() {
               onClick={() => {
                 if (!data) return
                 const honByKey = new Map<string, number>()
-                for (const h of data.snapshot.honorariosMensuales) {
+                for (const h of data.snapshot.honorariosMensuales ?? []) {
                   honByKey.set(
                     `${String(h.proyecto_id)}::${Number(h.mes)}`,
                     Number(h.honorarios) || 0
                   )
                 }
                 const horasByKey = new Map<string, number>()
-                for (const h of data.snapshot.horasMensuales) {
+                for (const h of data.snapshot.horasMensuales ?? []) {
                   horasByKey.set(
                     `${String(h.proyecto_id)}::${Number(h.mes)}`,
                     Number(h.horas) || 0
@@ -350,14 +350,26 @@ export function DashboardProyectos() {
                 }
                 const rows: ProyectoExportRow[] = data.snapshot.proyectos.map(
                   (p) => {
+                    // Per-month grid first; fall back to the scalar
+                    // honorarios_cotizador / horas_requeridas_mensual
+                    // spread across 12 months so the export has values
+                    // even before the user loads the monthly grids.
+                    const honoScalar =
+                      Number(
+                        p.precio_mensual ?? p.honorarios_cotizador ?? 0
+                      ) || 0
+                    const horasScalar =
+                      Number(p.horas_requeridas_mensual ?? 0) || 0
                     const honorariosPorMes: number[] = []
                     const horasPorMes: number[] = []
                     for (let m = 1; m <= 12; m++) {
+                      const honM = honByKey.get(`${String(p.id)}::${m}`)
+                      const horM = horasByKey.get(`${String(p.id)}::${m}`)
                       honorariosPorMes.push(
-                        honByKey.get(`${String(p.id)}::${m}`) ?? 0
+                        honM != null && honM > 0 ? honM : honoScalar
                       )
                       horasPorMes.push(
-                        horasByKey.get(`${String(p.id)}::${m}`) ?? 0
+                        horM != null && horM > 0 ? horM : horasScalar
                       )
                     }
                     return { proyecto: p, honorariosPorMes, horasPorMes }

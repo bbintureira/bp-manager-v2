@@ -413,17 +413,22 @@ export function DashboardBrandPartners() {
             <Button
               type="button"
               variant="secondary"
-              onClick={() => {
-                if (!snapshot) return
-                const rows: BPRentabilidadExportRow[] =
-                  snapshot.brandPartners.map((bp) => {
+              onClick={async () => {
+                // The page snapshot may be month-scoped (monthly view) —
+                // asignaciones / sueldos are filtered to a single mes,
+                // which would zero-out every other month in the export.
+                // Always pull the annual snapshot for exports so the
+                // file carries the full 12 months.
+                const snap = await getAnnualSnapshot()
+                const rows: BPRentabilidadExportRow[] = snap.brandPartners.map(
+                  (bp) => {
                     const year = bpRentabilidadYear(
                       bp,
-                      snapshot.asignaciones,
-                      snapshot.sueldos,
-                      snapshot.proyectos,
-                      snapshot.honorariosMensuales,
-                      snapshot.horasMensuales
+                      snap.asignaciones,
+                      snap.sueldos,
+                      snap.proyectos,
+                      snap.honorariosMensuales,
+                      snap.horasMensuales
                     )
                     return {
                       bp,
@@ -431,7 +436,8 @@ export function DashboardBrandPartners() {
                       costosPorMes: year.byMonth.map((m) => m.costo),
                       margenesPorMes: year.byMonth.map((m) => m.margen),
                     }
-                  })
+                  }
+                )
                 exportBrandPartners(rows)
               }}
               disabled={!snapshot || loading}
@@ -442,12 +448,9 @@ export function DashboardBrandPartners() {
             <Button
               type="button"
               variant="secondary"
-              onClick={() => {
-                if (!snapshot) return
-                exportBrandPartnersHoras(
-                  snapshot.brandPartners,
-                  snapshot.asignaciones
-                )
+              onClick={async () => {
+                const snap = await getAnnualSnapshot()
+                exportBrandPartnersHoras(snap.brandPartners, snap.asignaciones)
               }}
               disabled={!snapshot || loading}
             >

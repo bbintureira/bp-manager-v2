@@ -39,14 +39,20 @@ function downloadWorkbook(wb: XLSX.WorkBook, filename: string): void {
 
 export interface ProyectoExportRow {
   proyecto: Proyecto
-  /** Length 12, index i = mes i+1. */
+  /** Length 12, index i = mes i+1. Pad with zeros if the project has no
+   *  rows for some months. */
   honorariosPorMes: number[]
+  /** Length 12. If the per-month grid is empty (no rows in
+   *  `horas_proyecto` yet), callers should pre-fill from
+   *  `proyecto.horas_requeridas_mensual` so the export carries the
+   *  scalar fallback through every month. */
   horasPorMes: number[]
 }
 
 export function exportProyectos(rows: ProyectoExportRow[]): void {
   const aoa: (string | number)[][] = []
-  // Header
+  // Header: both groups always written so the file shape is stable even
+  // when some projects have no horas / honorarios loaded yet.
   aoa.push([
     'Nombre',
     'Tipo',
@@ -55,16 +61,17 @@ export function exportProyectos(rows: ProyectoExportRow[]): void {
     ...MONTH_LABELS.map((m) => `Honorario ${m}`),
     ...MONTH_LABELS.map((m) => `Horas ${m}`),
   ])
-  // Rows
   for (const row of rows) {
     const p = row.proyecto
+    const hon = row.honorariosPorMes ?? []
+    const hor = row.horasPorMes ?? []
     aoa.push([
       p.nombre,
       p.tipo ?? '',
       p.status ?? '',
       formatDate(p.fecha_inicio),
-      ...row.honorariosPorMes.map((v) => Number(v) || 0),
-      ...row.horasPorMes.map((v) => Number(v) || 0),
+      ...Array.from({ length: 12 }, (_, i) => Number(hon[i]) || 0),
+      ...Array.from({ length: 12 }, (_, i) => Number(hor[i]) || 0),
     ])
   }
   const ws = XLSX.utils.aoa_to_sheet(aoa)
@@ -163,102 +170,34 @@ export function exportBrandPartnersHoras(
 export interface AsignacionExportContext {
   proyectos: Proyecto[]
   brandPartners: BrandPartner[]
-  sueldos: { bp_id: string | number; mes: number; sueldo: number }[]
-  honorariosMensuales: {
-    proyecto_id: string | number
-    mes: number
-    honorarios: number
-  }[]
-  horasMensuales: {
-    proyecto_id: string | number
-    mes: number
-    horas: number
-  }[]
 }
 
-/** 160h is the conventional capacity; mirrors HOURS_PER_MONTH. */
-const HOURS_PER_MONTH = 160
-
+/**
+ * Per the latest spec, the asignaciones export carries assignment-only
+ * data — no rates, no margenes, no monetary columns. If you need the
+ * rentabilidad numbers, use the BPs / Proyectos exports instead.
+ */
 export function exportAsignaciones(
   asignaciones: Asignacion[],
   ctx: AsignacionExportContext
 ): void {
-  const projById = new Map(
-    ctx.proyectos.map((p) => [String(p.id), p])
-  )
-  const bpById = new Map(
-    ctx.brandPartners.map((b) => [String(b.id), b])
-  )
-  const sueldoByKey = new Map<string, number>()
-  for (const s of ctx.sueldos) {
-    sueldoByKey.set(`${String(s.bp_id)}::${Number(s.mes)}`, Number(s.sueldo) || 0)
-  }
-  const horasReqByKey = new Map<string, number>()
-  for (const h of ctx.horasMensuales) {
-    horasReqByKey.set(
-      `${String(h.proyecto_id)}::${Number(h.mes)}`,
-      Number(h.horas) || 0
-    )
-  }
-  const honorariosByKey = new Map<string, number>()
-  for (const h of ctx.honorariosMensuales) {
-    honorariosByKey.set(
-      `${String(h.proyecto_id)}::${Number(h.mes)}`,
-      Number(h.honorarios) || 0
-    )
-  }
+  const projById = new Map(ctx.proyectos.map((p) => [String(p.id), p]))
+  const bpById = new Map(ctx.brandPartners.map((b) => [String(b.id), b]))
 
   const aoa: (string | number)[][] = []
-  aoa.push([
-    'Proyecto',
-    'BP',
-    'Célula',
-    'Mes',
-    'Horas asignadas',
-    '$/h proyecto',
-    '$/h BP',
-    'Margen ($)',
-    'Margen (%)',
-  ])
+  aoa.push(['Proyecto', 'BP', 'Célula', 'Mes', 'Horas asignadas'])
   for (const a of asignaciones) {
     const horas = Number(a.horas) || 0
     if (horas <= 0) continue
     const mes = Number(a.mes)
     const proyecto = projById.get(String(a.proyecto_id)) ?? null
     const bp = bpById.get(String(a.bp_id)) ?? null
-
-    const honorarios =
-      honorariosByKey.get(`${String(a.proyecto_id)}::${mes}`) ??
-      Number(proyecto?.precio_mensual ?? proyecto?.honorarios_cotizador ?? 0)
-    const horasReq =
-      horasReqByKey.get(`${String(a.proyecto_id)}::${mes}`) ||
-      Number(proyecto?.horas_requeridas_mensual ?? HOURS_PER_MONTH)
-    const ratePerHourProy = horasReq > 0 ? honorarios / horasReq : 0
-
-    const sueldoMes =
-      sueldoByKey.get(`${String(a.bp_id)}::${mes}`) ??
-      Number(bp?.sueldo_mensual ?? 0)
-    const capacidad =
-      bp?.capacidad_horas_mensual != null && Number(bp.capacidad_horas_mensual) > 0
-        ? Number(bp.capacidad_horas_mensual)
-        : HOURS_PER_MONTH
-    const ratePerHourBp = capacidad > 0 ? sueldoMes / capacidad : 0
-
-    const ingreso = ratePerHourProy * horas
-    const costo = ratePerHourBp * horas
-    const margen = ingreso - costo
-    const margenPct = ingreso > 0 ? (margen / ingreso) * 100 : 0
-
     aoa.push([
       proyecto?.nombre ?? '—',
       bp?.nombre ?? '—',
       bp?.grouper ?? '',
       MONTH_LABELS[mes - 1] ?? String(mes),
       Math.round(horas * 100) / 100,
-      Math.round(ratePerHourProy * 100) / 100,
-      Math.round(ratePerHourBp * 100) / 100,
-      Math.round(margen * 100) / 100,
-      Math.round(margenPct * 10) / 10,
     ])
   }
   const ws = XLSX.utils.aoa_to_sheet(aoa)
