@@ -6,7 +6,7 @@ import {
   type FormEvent,
 } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { FileDown, Loader2, Plus, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/components/layout/app-layout'
@@ -70,6 +70,7 @@ import { matchesQuery, useSearch } from '@/hooks/useSearch'
 import { displaySeniority } from '@/lib/seniority'
 import { exportAsignaciones } from '@/utils/exportToExcel'
 import { importAsignaciones } from '@/utils/importFromExcel'
+import { ExportButton } from '@/components/ui/export-button'
 import { UploadButton } from '@/components/ui/upload-button'
 import { cn } from '@/lib/utils'
 
@@ -714,20 +715,24 @@ export function AsignacionesPage() {
         }
         action={
           <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() =>
-                exportAsignaciones(allAsignaciones, {
-                  proyectos,
-                  brandPartners,
+            <ExportButton
+              label="Descargar Excel"
+              onExport={async () => {
+                // Fetch fresh — the page caches proyectos / BPs /
+                // asignaciones at mount and they can drift behind any
+                // edits made in another view or tab.
+                const [freshAsignaciones, freshProyectos, freshBps] =
+                  await Promise.all([
+                    getAsignaciones(),
+                    getProyectos(),
+                    getBrandPartners(),
+                  ])
+                exportAsignaciones(freshAsignaciones, {
+                  proyectos: freshProyectos,
+                  brandPartners: freshBps,
                 })
-              }
-              disabled={loading || allAsignaciones.length === 0}
-            >
-              <FileDown className="w-3.5 h-3.5" />
-              Descargar Excel
-            </Button>
+              }}
+            />
             <UploadButton
               label="Subir Excel"
               onFile={importAsignaciones}

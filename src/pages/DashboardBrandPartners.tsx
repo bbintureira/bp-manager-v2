@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FileDown, Pencil, Plus, Settings2, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Settings2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/components/layout/app-layout'
@@ -60,6 +60,7 @@ import {
   type BPRentabilidadExportRow,
 } from '@/utils/exportToExcel'
 import { importBrandPartners } from '@/utils/importFromExcel'
+import { ExportButton } from '@/components/ui/export-button'
 import { UploadButton } from '@/components/ui/upload-button'
 import { cn } from '@/lib/utils'
 
@@ -412,15 +413,12 @@ export function DashboardBrandPartners() {
         } · ${tab === 'horas' ? 'Utilización de horas' : 'Rentabilidad en pesos'}`}
         action={
           <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={async () => {
-                // The page snapshot may be month-scoped (monthly view) —
-                // asignaciones / sueldos are filtered to a single mes,
-                // which would zero-out every other month in the export.
-                // Always pull the annual snapshot for exports so the
-                // file carries the full 12 months.
+            <ExportButton
+              label="Descargar rentabilidad"
+              onExport={async () => {
+                // Always pull the annual snapshot fresh for exports so
+                // the file carries the full 12 months even if the page
+                // is currently in month-scoped view.
                 const snap = await getAnnualSnapshot()
                 const rows: BPRentabilidadExportRow[] = snap.brandPartners.map(
                   (bp) => {
@@ -442,23 +440,14 @@ export function DashboardBrandPartners() {
                 )
                 exportBrandPartners(rows)
               }}
-              disabled={!snapshot || loading}
-            >
-              <FileDown className="w-3.5 h-3.5" />
-              Descargar rentabilidad
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={async () => {
+            />
+            <ExportButton
+              label="Descargar horas"
+              onExport={async () => {
                 const snap = await getAnnualSnapshot()
                 exportBrandPartnersHoras(snap.brandPartners, snap.asignaciones)
               }}
-              disabled={!snapshot || loading}
-            >
-              <FileDown className="w-3.5 h-3.5" />
-              Descargar horas
-            </Button>
+            />
             <UploadButton
               label="Subir Excel"
               onFile={importBrandPartners}

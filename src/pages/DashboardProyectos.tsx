@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Coins, FileDown, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Coins, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Bar,
@@ -78,6 +78,7 @@ import {
 import { matchesQuery, useSearch } from '@/hooks/useSearch'
 import { exportProyectos, type ProyectoExportRow } from '@/utils/exportToExcel'
 import { importProyectos } from '@/utils/importFromExcel'
+import { ExportButton } from '@/components/ui/export-button'
 import { UploadButton } from '@/components/ui/upload-button'
 
 // --------------------------------------------------------------------------
@@ -331,59 +332,55 @@ export function DashboardProyectos() {
         }
         action={
           <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                if (!data) return
+            <ExportButton
+              label="Descargar Excel"
+              onExport={async () => {
+                // Always pull fresh data — page state may be stale (the
+                // user could have edited in another tab or another user
+                // just upserted).
+                const snap = await getAnnualSnapshot()
                 const honByKey = new Map<string, number>()
-                for (const h of data.snapshot.honorariosMensuales ?? []) {
+                for (const h of snap.honorariosMensuales ?? []) {
                   honByKey.set(
                     `${String(h.proyecto_id)}::${Number(h.mes)}`,
                     Number(h.honorarios) || 0
                   )
                 }
                 const horasByKey = new Map<string, number>()
-                for (const h of data.snapshot.horasMensuales ?? []) {
+                for (const h of snap.horasMensuales ?? []) {
                   horasByKey.set(
                     `${String(h.proyecto_id)}::${Number(h.mes)}`,
                     Number(h.horas) || 0
                   )
                 }
-                const rows: ProyectoExportRow[] = data.snapshot.proyectos.map(
-                  (p) => {
-                    // Per-month grid first; fall back to the scalar
-                    // honorarios_cotizador / horas_requeridas_mensual
-                    // spread across 12 months so the export has values
-                    // even before the user loads the monthly grids.
-                    const honoScalar =
-                      Number(
-                        p.precio_mensual ?? p.honorarios_cotizador ?? 0
-                      ) || 0
-                    const horasScalar =
-                      Number(p.horas_requeridas_mensual ?? 0) || 0
-                    const honorariosPorMes: number[] = []
-                    const horasPorMes: number[] = []
-                    for (let m = 1; m <= 12; m++) {
-                      const honM = honByKey.get(`${String(p.id)}::${m}`)
-                      const horM = horasByKey.get(`${String(p.id)}::${m}`)
-                      honorariosPorMes.push(
-                        honM != null && honM > 0 ? honM : honoScalar
-                      )
-                      horasPorMes.push(
-                        horM != null && horM > 0 ? horM : horasScalar
-                      )
-                    }
-                    return { proyecto: p, honorariosPorMes, horasPorMes }
+                const rows: ProyectoExportRow[] = snap.proyectos.map((p) => {
+                  // Per-month grid first; fall back to the scalar
+                  // honorarios_cotizador / horas_requeridas_mensual
+                  // spread across 12 months so the export has values
+                  // even before the user loads the monthly grids.
+                  const honoScalar =
+                    Number(
+                      p.precio_mensual ?? p.honorarios_cotizador ?? 0
+                    ) || 0
+                  const horasScalar =
+                    Number(p.horas_requeridas_mensual ?? 0) || 0
+                  const honorariosPorMes: number[] = []
+                  const horasPorMes: number[] = []
+                  for (let m = 1; m <= 12; m++) {
+                    const honM = honByKey.get(`${String(p.id)}::${m}`)
+                    const horM = horasByKey.get(`${String(p.id)}::${m}`)
+                    honorariosPorMes.push(
+                      honM != null && honM > 0 ? honM : honoScalar
+                    )
+                    horasPorMes.push(
+                      horM != null && horM > 0 ? horM : horasScalar
+                    )
                   }
-                )
+                  return { proyecto: p, honorariosPorMes, horasPorMes }
+                })
                 exportProyectos(rows)
               }}
-              disabled={!data || loading}
-            >
-              <FileDown className="w-3.5 h-3.5" />
-              Descargar Excel
-            </Button>
+            />
             <UploadButton
               label="Subir Excel"
               onFile={importProyectos}
