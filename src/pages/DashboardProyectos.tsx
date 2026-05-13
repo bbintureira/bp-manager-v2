@@ -354,10 +354,13 @@ export function DashboardProyectos() {
                   )
                 }
                 const rows: ProyectoExportRow[] = snap.proyectos.map((p) => {
-                  // Per-month grid first; fall back to the scalar
-                  // honorarios_cotizador / horas_requeridas_mensual
-                  // spread across 12 months so the export has values
-                  // even before the user loads the monthly grids.
+                  // Per-month grid is authoritative when it exists:
+                  // `0` is a legitimate stored value (e.g. a month the
+                  // project doesn't bill / staff). Only fall back to the
+                  // scalar when there's no row at all for the (project,
+                  // mes) pair, so projects that haven't been touched
+                  // since the per-month table was introduced still show
+                  // something.
                   const honoScalar =
                     Number(
                       p.precio_mensual ?? p.honorarios_cotizador ?? 0
@@ -367,13 +370,17 @@ export function DashboardProyectos() {
                   const honorariosPorMes: number[] = []
                   const horasPorMes: number[] = []
                   for (let m = 1; m <= 12; m++) {
-                    const honM = honByKey.get(`${String(p.id)}::${m}`)
-                    const horM = horasByKey.get(`${String(p.id)}::${m}`)
+                    const honKey = `${String(p.id)}::${m}`
+                    const horKey = `${String(p.id)}::${m}`
                     honorariosPorMes.push(
-                      honM != null && honM > 0 ? honM : honoScalar
+                      honByKey.has(honKey)
+                        ? honByKey.get(honKey) ?? 0
+                        : honoScalar
                     )
                     horasPorMes.push(
-                      horM != null && horM > 0 ? horM : horasScalar
+                      horasByKey.has(horKey)
+                        ? horasByKey.get(horKey) ?? 0
+                        : horasScalar
                     )
                   }
                   return { proyecto: p, honorariosPorMes, horasPorMes }
