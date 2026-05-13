@@ -44,16 +44,13 @@ import { StatusBadge, type StatusVariant } from '@/components/ui/status-badge'
 import { ViewToggle, type ViewMode } from '@/components/ui/view-toggle'
 import {
   formatCompactCurrency,
-  formatCompactHours,
   formatCurrency,
   formatHours,
   formatNumber,
   formatPercent,
 } from '@/lib/format'
 import {
-  HOURS_PER_MONTH,
   calculateBPCosts,
-  calculateIdleHours,
   calculateMargin,
   calculateMonthlyRevenue,
   aggregateRentabilidad,
@@ -107,7 +104,6 @@ interface MonthlyData {
   snapshot: DashboardSnapshot
   revenue: number
   costs: number
-  idleHours: number
   marginPercent: number
   projectSummaries: ProjectMonthSummary[]
   rentabilidad: AggregatedRentabilidad
@@ -145,12 +141,6 @@ function deriveMonthly(snapshot: DashboardSnapshot, mes: number): MonthlyData {
     snapshot,
     revenue,
     costs,
-    idleHours: calculateIdleHours(
-      snapshot.brandPartners,
-      snapshot.asignaciones,
-      mes,
-      snapshot.sueldos
-    ),
     marginPercent: calculateMargin(revenue, costs),
     projectSummaries: summarizeAllProjects(
       snapshot.proyectos,
@@ -460,9 +450,9 @@ export function DashboardProyectos() {
       {error && <ErrorBanner message={error} />}
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {loading || !data ? (
-          <KpiSkeletonGrid count={5} />
+          <KpiSkeletonGrid count={4} />
         ) : data.mode === 'monthly' ? (
           <>
             <KpiCard
@@ -486,12 +476,6 @@ export function DashboardProyectos() {
                   ? `${formatCompactCurrency(data.revenue - data.costs)} netos`
                   : 'sin datos'
               }
-            />
-            <KpiCard
-              label="Horas idle"
-              value={formatCompactHours(data.idleHours)}
-              fullValue={formatHours(data.idleHours)}
-              meta={`sobre ${formatCompactHours(data.snapshot.brandPartners.length * HOURS_PER_MONTH)} disponibles`}
             />
           </>
         ) : (
@@ -517,12 +501,6 @@ export function DashboardProyectos() {
                   ? `${formatCompactCurrency(data.kpis.revenue - data.kpis.costs)} netos`
                   : 'sin datos'
               }
-            />
-            <KpiCard
-              label="Horas idle (año)"
-              value={formatCompactHours(data.kpis.idleHours)}
-              fullValue={formatHours(data.kpis.idleHours)}
-              meta="suma de 12 meses"
             />
           </>
         )}
