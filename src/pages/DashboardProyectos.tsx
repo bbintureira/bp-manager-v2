@@ -87,16 +87,23 @@ function statusVariantFor(raw: string | null | undefined): {
   label: string
 } {
   const v = (raw ?? '').toLowerCase().trim()
-  if (['activo', 'active', 'on-track'].includes(v)) {
-    return { variant: 'active', label: 'Activo' }
+  if (
+    [
+      'finalizado',
+      'finished',
+      'closed',
+      'cerrado',
+      'completed',
+      'done',
+    ].includes(v)
+  ) {
+    return { variant: 'neutral', label: 'Finalizado' }
   }
-  if (['idle', 'pausado', 'paused', 'pause'].includes(v)) {
-    return { variant: 'idle', label: 'Idle' }
-  }
-  if (['perdido', 'pierde', 'over', 'risk', 'en riesgo'].includes(v)) {
-    return { variant: 'over', label: 'Pierde' }
-  }
-  return { variant: 'neutral', label: raw ? raw : '—' }
+  // Everything else — including legacy 'ok', empty, or any unknown
+  // string — collapses to Activo. There are only two real states now
+  // (Activo / Finalizado); old rows that wrote 'OK' get rendered as
+  // Activo instead of leaking the raw label.
+  return { variant: 'active', label: 'Activo' }
 }
 
 interface MonthlyData {

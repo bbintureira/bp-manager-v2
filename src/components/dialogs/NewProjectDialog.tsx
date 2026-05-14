@@ -21,7 +21,6 @@ import { cn } from '@/lib/utils'
 
 const STATUS_OPTIONS = [
   { value: 'activo', label: 'Activo' },
-  { value: 'pausado', label: 'Pausado' },
   { value: 'finalizado', label: 'Finalizado' },
 ]
 
