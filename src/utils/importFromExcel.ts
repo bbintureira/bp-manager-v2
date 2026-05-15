@@ -261,7 +261,11 @@ export async function importProyectos(file: File): Promise<ImportResult> {
     }
 
     // Per-month honorarios + horas. Send the whole 12-row batch even if
-    // some are zero — keeps the table consistent with the file.
+    // some are zero — keeps the table consistent with the file. `.select()`
+    // is forced so we can verify rows were actually persisted: a silent
+    // 0-row response means a missing UNIQUE constraint, RLS block, or a
+    // mismatched proyecto_id, all of which would otherwise look like
+    // success to the user.
     const honRows = honMonths.map((honorarios, i) => ({
       proyecto_id,
       mes: i + 1,
@@ -272,20 +276,34 @@ export async function importProyectos(file: File): Promise<ImportResult> {
       mes: i + 1,
       horas: Math.max(0, horas),
     }))
-    const [{ error: honErr }, { error: horasErr }] = await Promise.all([
+    const [honRes, horasRes] = await Promise.all([
       supabase
         .from('proyecto_honorarios_mensuales')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .upsert(honRows as any, { onConflict: 'proyecto_id,mes' }),
+        .upsert(honRows as any, { onConflict: 'proyecto_id,mes' })
+        .select('id'),
       supabase
         .from('horas_proyecto')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .upsert(horasRows as any, { onConflict: 'proyecto_id,mes' }),
+        .upsert(horasRows as any, { onConflict: 'proyecto_id,mes' })
+        .select('id'),
     ])
-    if (honErr || horasErr) {
+    if (honRes.error || horasRes.error) {
       skipped++
       errors.push(
-        `${nombre}: ${(honErr ?? horasErr)?.message ?? 'monthly upsert failed'}`
+        `${nombre}: ${(honRes.error ?? horasRes.error)?.message ?? 'monthly upsert failed'}`
+      )
+      continue
+    }
+    const honWritten = honRes.data?.length ?? 0
+    const horasWritten = horasRes.data?.length ?? 0
+    if (honWritten === 0 && horasWritten === 0) {
+      // Both monthly upserts came back empty — the row update on
+      // `proyectos` succeeded but neither monthly table accepted the
+      // new values. This is the silent-failure case we want surfaced.
+      skipped++
+      errors.push(
+        `${nombre}: la actualización mensual no escribió ninguna fila (¿RLS o constraint UNIQUE faltante?)`
       )
       continue
     }
