@@ -260,12 +260,14 @@ export async function importProyectos(file: File): Promise<ImportResult> {
       inserted++
     }
 
-    // Per-month honorarios + horas. Send the whole 12-row batch even if
-    // some are zero — keeps the table consistent with the file. `.select()`
-    // is forced so we can verify rows were actually persisted: a silent
-    // 0-row response means a missing UNIQUE constraint, RLS block, or a
-    // mismatched proyecto_id, all of which would otherwise look like
-    // success to the user.
+    // Per-month honorarios + horas. We replace the project's monthly
+    // state atomically — delete-then-insert — instead of upserting on
+    // (proyecto_id, mes). Reason: \`upsert\` with \`onConflict\` relies on
+    // the UNIQUE constraint being present AND on PostgREST translating
+    // the conflict resolution correctly. We were seeing the call
+    // resolve as 'success' without any new value landing (likely the
+    // constraint accepted the row as a duplicate-no-op). Delete-then-
+    // insert removes that dependency entirely.
     const honRows = honMonths.map((honorarios, i) => ({
       proyecto_id,
       mes: i + 1,
@@ -276,41 +278,51 @@ export async function importProyectos(file: File): Promise<ImportResult> {
       mes: i + 1,
       horas: Math.max(0, horas),
     }))
+    const [delHonRes, delHorasRes] = await Promise.all([
+      supabase
+        .from('proyecto_honorarios_mensuales')
+        .delete()
+        .eq('proyecto_id', proyecto_id),
+      supabase
+        .from('horas_proyecto')
+        .delete()
+        .eq('proyecto_id', proyecto_id),
+    ])
+    if (delHonRes.error || delHorasRes.error) {
+      skipped++
+      errors.push(
+        `${nombre}: borrado mensual falló: ${(delHonRes.error ?? delHorasRes.error)?.message ?? '?'}`
+      )
+      continue
+    }
     const [honRes, horasRes] = await Promise.all([
       supabase
         .from('proyecto_honorarios_mensuales')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .upsert(honRows as any, { onConflict: 'proyecto_id,mes' })
+        .insert(honRows as any)
         .select('id'),
       supabase
         .from('horas_proyecto')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .upsert(horasRows as any, { onConflict: 'proyecto_id,mes' })
+        .insert(horasRows as any)
         .select('id'),
     ])
     if (honRes.error || horasRes.error) {
       skipped++
       errors.push(
-        `${nombre}: ${(honRes.error ?? horasRes.error)?.message ?? 'monthly upsert failed'}`
+        `${nombre}: insert mensual falló: ${(honRes.error ?? horasRes.error)?.message ?? '?'}`
       )
       continue
     }
     const honWritten = honRes.data?.length ?? 0
     const horasWritten = horasRes.data?.length ?? 0
     if (honWritten === 0 && horasWritten === 0) {
-      // Both monthly upserts came back empty — the row update on
-      // `proyectos` succeeded but neither monthly table accepted the
-      // new values. This is the silent-failure case we want surfaced.
       skipped++
       errors.push(
-        `${nombre}: la actualización mensual no escribió ninguna fila (¿RLS o constraint UNIQUE faltante?)`
+        `${nombre}: la inserción mensual no escribió ninguna fila`
       )
       continue
     }
-    // Debug aid for stale-UI reports: surface the values actually sent
-    // to Supabase per project, plus what the read-back returned. Lets
-    // the user (or me) compare DevTools console to the dashboard table
-    // without round-tripping.
     console.log('[import proyectos]', nombre, {
       proyecto_id,
       sent_honorarios: honMonths,
