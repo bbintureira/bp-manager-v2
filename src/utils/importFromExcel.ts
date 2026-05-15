@@ -163,6 +163,8 @@ export async function importProyectos(file: File): Promise<ImportResult> {
   const byName = indexByName(((existing ?? []) as ProyectoRow[]))
 
   let imported = 0
+  let updated = 0
+  let inserted = 0
   let skipped = 0
   const errors: string[] = []
 
@@ -221,16 +223,27 @@ export async function importProyectos(file: File): Promise<ImportResult> {
 
     if (found) {
       proyecto_id = String(found.id)
-      const { error } = await supabase
+      // `.select('id')` forces Supabase to return the row it touched,
+      // so we can confirm the UPDATE actually hit something (RLS,
+      // mismatched id, etc.). Without this the call resolves with
+      // {error: null, data: null} either way.
+      const { data, error } = await supabase
         .from('proyectos')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .update(baseFields as any)
         .eq('id', proyecto_id)
+        .select('id')
       if (error) {
         skipped++
         errors.push(`${nombre}: ${error.message}`)
         continue
       }
+      if (!data || data.length === 0) {
+        skipped++
+        errors.push(`${nombre}: update no afectó filas (id ${proyecto_id})`)
+        continue
+      }
+      updated++
     } else {
       const { data, error } = await supabase
         .from('proyectos')
@@ -244,6 +257,7 @@ export async function importProyectos(file: File): Promise<ImportResult> {
         continue
       }
       proyecto_id = String(data.id)
+      inserted++
     }
 
     // Per-month honorarios + horas. Send the whole 12-row batch even if
@@ -278,10 +292,14 @@ export async function importProyectos(file: File): Promise<ImportResult> {
     imported++
   }
 
+  const parts: string[] = []
+  if (updated > 0) parts.push(`${updated} actualizados`)
+  if (inserted > 0) parts.push(`${inserted} creados`)
+  if (skipped > 0) parts.push(`${skipped} con errores`)
   const message =
     imported === 0
       ? `Sin proyectos importados. ${errors[0] ?? ''}`.trim()
-      : `${imported} proyectos importados${skipped > 0 ? ` · ${skipped} con errores` : ''}.`
+      : `Proyectos: ${parts.join(' · ')}.`
   return {
     success: imported > 0,
     imported,

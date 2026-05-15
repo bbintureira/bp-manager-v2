@@ -242,9 +242,10 @@ export function DashboardProyectos() {
     void fetchData(viewMode, mes)
   }, [viewMode, mes, fetchData])
 
-  const refetch = useCallback(() => {
-    void fetchData(viewMode, mes)
-  }, [fetchData, viewMode, mes])
+  const refetch = useCallback(
+    () => fetchData(viewMode, mes),
+    [fetchData, viewMode, mes]
+  )
 
   // Filter helpers shared across monthly + annual views.
   const allTiposSelected = tipoFilter.length === TIPO_OPTIONS.length

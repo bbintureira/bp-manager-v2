@@ -12,8 +12,9 @@ export interface UploadButtonProps {
    *  button can surface success/error toasts uniformly. */
   onFile: (file: File) => Promise<ImportResult>
   /** Fired once the import finishes successfully — used by callers to
-   *  refresh the page state. */
-  onComplete?: () => void
+   *  refresh the page state. If it returns a promise, the busy spinner
+   *  stays on until the refresh resolves. */
+  onComplete?: () => void | Promise<void>
   disabled?: boolean
 }
 
@@ -42,7 +43,10 @@ export function UploadButton({
       const result = await onFile(file)
       if (result.success) {
         toast.success(result.message)
-        onComplete?.()
+        // Await the caller's refresh so the spinner stays on for the
+        // full round-trip — release-with-stale-UI was the reason
+        // uploads looked like no-ops.
+        await onComplete?.()
       } else {
         toast.error(result.message)
       }

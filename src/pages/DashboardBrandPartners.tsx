@@ -128,9 +128,10 @@ export function DashboardBrandPartners() {
     void fetchData(view, mes)
   }, [view, mes, fetchData])
 
-  const refetch = useCallback(() => {
-    void fetchData(view, mes)
-  }, [fetchData, view, mes])
+  const refetch = useCallback(
+    () => fetchData(view, mes),
+    [fetchData, view, mes]
+  )
 
   const filterableGroupers = useMemo(
     () => [...canonicalGroupers].sort((a, b) => a.nombre.localeCompare(b.nombre)),
