@@ -222,9 +222,39 @@ export function DashboardProyectos() {
       try {
         if (mode === 'annual') {
           const snap = await getAnnualSnapshot()
+          // Debug aid: surface what the fresh snapshot actually carries
+          // for the first project (mes 1..12 honorarios + horas). Helps
+          // diagnose stale-UI complaints without round-trips through me.
+          if (snap.proyectos[0]) {
+            const p = snap.proyectos[0]
+            const hon = snap.honorariosMensuales
+              .filter((h) => String(h.proyecto_id) === String(p.id))
+              .sort((a, b) => a.mes - b.mes)
+            const horas = snap.horasMensuales
+              .filter((h) => String(h.proyecto_id) === String(p.id))
+              .sort((a, b) => a.mes - b.mes)
+            console.log('[dashboard] annual snapshot for', p.nombre, {
+              honorarios: hon.map((r) => r.honorarios),
+              horas: horas.map((r) => r.horas),
+            })
+          }
           setData(deriveAnnual(snap))
         } else {
           const snap = await getDashboardSnapshot(selectedMes)
+          if (snap.proyectos[0]) {
+            const p = snap.proyectos[0]
+            const hon = snap.honorariosMensuales
+              .filter((h) => String(h.proyecto_id) === String(p.id))
+              .sort((a, b) => a.mes - b.mes)
+            const horas = snap.horasMensuales
+              .filter((h) => String(h.proyecto_id) === String(p.id))
+              .sort((a, b) => a.mes - b.mes)
+            console.log('[dashboard] monthly snapshot for', p.nombre, {
+              mes: selectedMes,
+              honorarios: hon.map((r) => r.honorarios),
+              horas: horas.map((r) => r.horas),
+            })
+          }
           setData(deriveMonthly(snap, selectedMes))
         }
       } catch (e) {

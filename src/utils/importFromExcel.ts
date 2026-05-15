@@ -307,6 +307,17 @@ export async function importProyectos(file: File): Promise<ImportResult> {
       )
       continue
     }
+    // Debug aid for stale-UI reports: surface the values actually sent
+    // to Supabase per project, plus what the read-back returned. Lets
+    // the user (or me) compare DevTools console to the dashboard table
+    // without round-tripping.
+    console.log('[import proyectos]', nombre, {
+      proyecto_id,
+      sent_honorarios: honMonths,
+      sent_horas: horasMonths,
+      honorarios_rows_written: honWritten,
+      horas_rows_written: horasWritten,
+    })
     imported++
   }
 
