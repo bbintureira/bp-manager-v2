@@ -75,13 +75,19 @@ function trimStr(raw: unknown): string {
 
 async function readSheet(file: File): Promise<Record<string, unknown>[]> {
   const buf = await file.arrayBuffer()
-  const wb = XLSX.read(buf, { type: 'array' })
+  // `cellDates: true` returns JS Date objects for date cells so we don't
+  // have to parse Excel's serial-number format. `raw: true` on
+  // sheet_to_json keeps numbers as numbers (rather than the locale-
+  // formatted strings `raw: false` produces — those break `Number(...)`
+  // whenever the user has cells formatted with thousand separators or
+  // currency, which is the failure mode the upload was hitting).
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true })
   const name = wb.SheetNames[0]
   if (!name) return []
   const ws = wb.Sheets[name]
   return XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
     defval: null,
-    raw: false,
+    raw: true,
   })
 }
 
