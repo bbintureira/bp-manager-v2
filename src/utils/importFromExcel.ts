@@ -91,6 +91,19 @@ async function readSheet(file: File): Promise<Record<string, unknown>[]> {
   })
 }
 
+/** Fuzzy column reader — looks up a header by exact match, then by
+ *  case-insensitive trimmed match. Lets us tolerate headers like
+ *  'Nombre ' / 'NOMBRE' / 'nombre' that Excel or copy-paste might
+ *  produce, instead of silently dropping every row. */
+function getCol(row: Record<string, unknown>, name: string): unknown {
+  if (Object.prototype.hasOwnProperty.call(row, name)) return row[name]
+  const target = name.toLowerCase().trim()
+  for (const k of Object.keys(row)) {
+    if (k.toLowerCase().trim() === target) return row[k]
+  }
+  return undefined
+}
+
 /** Lowercase + trim case-insensitive lookup map. */
 function indexByName<T extends { nombre: string; id: unknown }>(
   rows: T[]
@@ -118,6 +131,23 @@ export async function importProyectos(file: File): Promise<ImportResult> {
     return { success: false, imported: 0, skipped: 0, message: 'El archivo está vacío.' }
   }
 
+  // Quick sanity check on the column layout — if no row carries a
+  // 'Nombre' cell at all, every iteration would silently skip and the
+  // user would see an unhelpful 'Sin proyectos importados.' toast.
+  const firstRow = rows[0] as Record<string, unknown>
+  const hasNombreCol =
+    rows.some((r) => getCol(r as Record<string, unknown>, 'Nombre') != null) ||
+    Object.keys(firstRow).some((k) => k.toLowerCase().trim() === 'nombre')
+  if (!hasNombreCol) {
+    const found = Object.keys(firstRow).slice(0, 8).join(', ')
+    return {
+      success: false,
+      imported: 0,
+      skipped: rows.length,
+      message: `Falta la columna "Nombre" en el Excel. Columnas detectadas: ${found || '(ninguna)'}`,
+    }
+  }
+
   // Snapshot of existing projects (by name) so we can decide update-vs-insert.
   const { data: existing, error: fetchErr } = await supabase
     .from('proyectos')
@@ -137,14 +167,14 @@ export async function importProyectos(file: File): Promise<ImportResult> {
   const errors: string[] = []
 
   for (const row of rows) {
-    const nombre = trimStr(row['Nombre'])
+    const nombre = trimStr(getCol(row, 'Nombre'))
     if (!nombre) {
       skipped++
       continue
     }
-    const tipo = trimStr(row['Tipo']) || null
-    const status = trimStr(row['Estado']) || 'activo'
-    const fecha_inicio = parseDateLoose(row['Fecha inicio'])
+    const tipo = trimStr(getCol(row, 'Tipo')) || null
+    const status = trimStr(getCol(row, 'Estado')) || 'activo'
+    const fecha_inicio = parseDateLoose(getCol(row, 'Fecha inicio'))
 
     // Pre-compute the per-month grids and scalar averages.
     const honMonths: number[] = []
@@ -154,8 +184,8 @@ export async function importProyectos(file: File): Promise<ImportResult> {
     let horasSum = 0
     let horasCount = 0
     for (let i = 0; i < 12; i++) {
-      const h = toNum(row[`Honorario ${MONTH_LABELS[i]}`])
-      const hr = toNum(row[`Horas ${MONTH_LABELS[i]}`])
+      const h = toNum(getCol(row, `Honorario ${MONTH_LABELS[i]}`))
+      const hr = toNum(getCol(row, `Horas ${MONTH_LABELS[i]}`))
       honMonths.push(h)
       horasMonths.push(hr)
       if (h > 0) {
@@ -305,12 +335,12 @@ export async function importBrandPartners(file: File): Promise<ImportResult> {
   const errors: string[] = []
 
   for (const row of rows) {
-    const nombre = trimStr(row['Nombre'])
+    const nombre = trimStr(getCol(row, 'Nombre'))
     if (!nombre) {
       skipped++
       continue
     }
-    const celulaName = trimStr(row['Célula']) || trimStr(row['Celula'])
+    const celulaName = trimStr(getCol(row, 'Célula')) || trimStr(getCol(row, 'Celula'))
     let grouper_id: string | null = null
     if (celulaName) {
       const gr = grByName.get(celulaName.toLowerCase())
@@ -392,10 +422,10 @@ export async function importAsignaciones(file: File): Promise<ImportResult> {
   const errors: string[] = []
 
   for (const row of rows) {
-    const proyectoName = trimStr(row['Proyecto'])
-    const bpName = trimStr(row['BP'])
-    const mes = mesFromLabel(row['Mes'])
-    const horas = toNum(row['Horas asignadas'])
+    const proyectoName = trimStr(getCol(row, 'Proyecto'))
+    const bpName = trimStr(getCol(row, 'BP'))
+    const mes = mesFromLabel(getCol(row, 'Mes'))
+    const horas = toNum(getCol(row, 'Horas asignadas'))
 
     if (!proyectoName || !bpName) {
       skipped++
@@ -403,7 +433,9 @@ export async function importAsignaciones(file: File): Promise<ImportResult> {
     }
     if (mes < 1 || mes > 12) {
       skipped++
-      errors.push(`Mes inválido para ${bpName} / ${proyectoName}: ${row['Mes']}`)
+      errors.push(
+        `Mes inválido para ${bpName} / ${proyectoName}: ${String(getCol(row, 'Mes') ?? '')}`
+      )
       continue
     }
     const p = projByName.get(proyectoName.toLowerCase())
