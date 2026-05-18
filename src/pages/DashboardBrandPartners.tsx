@@ -63,10 +63,19 @@ import { importBrandPartners } from '@/utils/importFromExcel'
 import { ExportButton } from '@/components/ui/export-button'
 import { UploadButton } from '@/components/ui/upload-button'
 import { cn } from '@/lib/utils'
+import { InfoTooltip } from '@/components/ui/InfoTooltip'
+import { TOOLTIPS } from '@/constants/tooltips'
 
 const CURRENT_YEAR = new Date().getFullYear()
 const defaultMonth = () => new Date().getMonth() + 1
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
+
+const withInfo = (text: string, tip: string) => (
+  <span className="inline-flex items-center gap-1">
+    {text}
+    <InfoTooltip text={tip} />
+  </span>
+)
 
 type TabKey = 'horas' | 'rentabilidad'
 
@@ -536,12 +545,12 @@ export function DashboardBrandPartners() {
               value={formatNumber(kpiStats.activos, 0)}
             />
             <KpiCard
-              label="% ocupación promedio"
+              label={withInfo('% ocupación promedio', TOOLTIPS.ocupacionPromedio)}
               value={formatPercent(kpiStats.ocupacion)}
               meta="del mes"
             />
             <KpiCard
-              label="Horas libres totales"
+              label={withInfo('Horas libres totales', TOOLTIPS.horasLibresTotales)}
               value={formatCompactHours(Math.round(kpiStats.totalLibres))}
               fullValue={formatHours(Math.round(kpiStats.totalLibres))}
               meta="del mes"
@@ -554,7 +563,7 @@ export function DashboardBrandPartners() {
               value={formatNumber(kpiStats.activos, 0)}
             />
             <KpiCard
-              label="% ocupación promedio"
+              label={withInfo('% ocupación promedio', TOOLTIPS.ocupacionPromedio)}
               value={formatPercent(kpiStats.ocupacion)}
               meta="anualizado"
             />
@@ -568,19 +577,19 @@ export function DashboardBrandPartners() {
         ) : kpiStats.kind === 'rentabilidad-mes' ? (
           <>
             <KpiCard
-              label="Margen total"
+              label={withInfo('Margen total', TOOLTIPS.margenTotal)}
               value={formatCompactCurrency(kpiStats.totalMargen)}
               fullValue={formatCurrency(kpiStats.totalMargen)}
               meta="del mes"
             />
             <KpiCard
-              label="Cobertura salarial total"
+              label={withInfo('Cobertura salarial total', TOOLTIPS.coberturaSalarialTotal)}
               value={formatCompactCurrency(kpiStats.totalCobertura)}
               fullValue={formatCurrency(kpiStats.totalCobertura)}
               meta="costo real − sueldo"
             />
             <KpiCard
-              label="% BPs con costo ≥ sueldo"
+              label={withInfo('% BPs con costo ≥ sueldo', TOOLTIPS.bpsConCostoMayorSueldo)}
               value={formatPercent(kpiStats.pctCovered)}
               meta={`${kpiStats.covered} de ${kpiStats.total}`}
             />
@@ -588,19 +597,19 @@ export function DashboardBrandPartners() {
         ) : (
           <>
             <KpiCard
-              label="Margen total"
+              label={withInfo('Margen total', TOOLTIPS.margenTotal)}
               value={formatCompactCurrency(kpiStats.totalMargen)}
               fullValue={formatCurrency(kpiStats.totalMargen)}
               meta="del año"
             />
             <KpiCard
-              label="Cobertura salarial total"
+              label={withInfo('Cobertura salarial total', TOOLTIPS.coberturaSalarialTotal)}
               value={formatCompactCurrency(kpiStats.totalCobertura)}
               fullValue={formatCurrency(kpiStats.totalCobertura)}
               meta="costo real − sueldo (año)"
             />
             <KpiCard
-              label="% BPs con costo ≥ sueldo"
+              label={withInfo('% BPs con costo ≥ sueldo', TOOLTIPS.bpsConCostoMayorSueldo)}
               value={formatPercent(kpiStats.pctCovered)}
               meta={`${kpiStats.covered} de ${kpiStats.total}`}
             />
@@ -859,13 +868,13 @@ function horasColumns(
     },
     {
       key: 'horasLibres',
-      header: 'Libres',
+      header: withInfo('Libres', TOOLTIPS.horasLibresColumna),
       numeric: true,
       render: (_v, row) => formatHours(Math.round(row.horasLibres)),
     },
     {
       key: 'ocupacion',
-      header: '% ocupación',
+      header: withInfo('% ocupación', TOOLTIPS.ocupacionColumna),
       numeric: true,
       render: (_v, row) => <OccupationCell pct={row.ocupacion} />,
     },
@@ -915,14 +924,14 @@ function rentabilidadColumns(
     },
     {
       key: 'ingresoCotizado',
-      header: 'Ingreso cotizado',
+      header: withInfo('Ingreso cotizado', TOOLTIPS.ingresoCotizado),
       numeric: true,
       render: (_v, row) =>
         row.ingresoCotizado > 0 ? formatCurrency(row.ingresoCotizado) : '—',
     },
     {
       key: 'margen',
-      header: 'Margen',
+      header: withInfo('Margen', TOOLTIPS.margenColumna),
       numeric: true,
       render: (_v, row) =>
         row.ingresoCotizado > 0 ? (
@@ -933,7 +942,7 @@ function rentabilidadColumns(
     },
     {
       key: 'coberturaSalarial',
-      header: 'Cobertura salarial',
+      header: withInfo('Cobertura salarial', TOOLTIPS.coberturaSalarialColumna),
       numeric: true,
       render: (_v, row) =>
         row.sueldoMensual > 0 ? (
@@ -1016,7 +1025,7 @@ function horasAnnualColumns(
     },
     {
       key: 'ocupacionPromedio',
-      header: '% ocupación',
+      header: withInfo('% ocupación', TOOLTIPS.ocupacionColumna),
       numeric: true,
       render: (_v, row) => <OccupationCell pct={row.ocupacionPromedio} />,
     },
@@ -1103,7 +1112,7 @@ function rentabilidadAnnualColumns(
     },
     {
       key: 'coberturaSalarial',
-      header: 'Cobertura salarial',
+      header: withInfo('Cobertura salarial', TOOLTIPS.coberturaSalarialColumna),
       numeric: true,
       render: (_v, row) =>
         row.totalSueldo > 0 ? (

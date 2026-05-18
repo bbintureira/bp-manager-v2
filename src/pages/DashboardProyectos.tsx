@@ -76,11 +76,20 @@ import { exportProyectos, type ProyectoExportRow } from '@/utils/exportToExcel'
 import { importProyectos } from '@/utils/importFromExcel'
 import { ExportButton } from '@/components/ui/export-button'
 import { UploadButton } from '@/components/ui/upload-button'
+import { InfoTooltip } from '@/components/ui/InfoTooltip'
+import { TOOLTIPS } from '@/constants/tooltips'
 
 // --------------------------------------------------------------------------
 
 const CURRENT_YEAR = new Date().getFullYear()
 const defaultMonth = () => new Date().getMonth() + 1
+
+const withInfo = (text: string, tip: string) => (
+  <span className="inline-flex items-center gap-1">
+    {text}
+    <InfoTooltip text={tip} />
+  </span>
+)
 
 function statusVariantFor(raw: string | null | undefined): {
   variant: StatusVariant
@@ -507,7 +516,7 @@ export function DashboardProyectos() {
             />
             <RentabilidadKpi data={data.rentabilidad} scope="mes" />
             <KpiCard
-              label="Margen bruto"
+              label={withInfo('Margen bruto', TOOLTIPS.margenBruto)}
               value={formatPercent(data.marginPercent)}
               meta={
                 data.revenue > 0
@@ -532,7 +541,7 @@ export function DashboardProyectos() {
             />
             <RentabilidadKpi data={data.rentabilidad} scope="año" />
             <KpiCard
-              label="Margen anual"
+              label={withInfo('Margen anual', TOOLTIPS.margenAnual)}
               value={formatPercent(data.kpis.marginPercent)}
               meta={
                 data.kpis.revenue > 0
@@ -678,7 +687,8 @@ export function DashboardProyectos() {
             columns={projectTableColumns<ProjectAnnualSummary>(
               setEditingProyecto,
               setDeletingProyecto,
-              setHonorariosProyecto
+              setHonorariosProyecto,
+              TOOLTIPS.ingresosColumnaAnual
             )}
             data={annualActive}
             rowKey={(r) => String(r.proyecto.id)}
@@ -763,7 +773,8 @@ interface ProjectRowLike {
 function projectTableColumns<T extends ProjectRowLike>(
   onEdit: (p: Proyecto) => void,
   onDelete: (p: Proyecto) => void,
-  onHonorarios?: (p: Proyecto) => void
+  onHonorarios?: (p: Proyecto) => void,
+  ingresosTooltipText?: string
 ): DataTableColumn<T>[] {
   return [
     {
@@ -794,19 +805,21 @@ function projectTableColumns<T extends ProjectRowLike>(
     },
     {
       key: 'ingresos',
-      header: 'Ingresos',
+      header: ingresosTooltipText
+        ? withInfo('Ingresos', ingresosTooltipText)
+        : 'Ingresos',
       numeric: true,
       render: (_v, row) => formatCurrency(row.revenue, 0),
     },
     {
       key: 'costo',
-      header: 'Costo',
+      header: withInfo('Costo', TOOLTIPS.costoColumna),
       numeric: true,
       render: (_v, row) => formatCurrency(row.cost, 0),
     },
     {
       key: 'resultado',
-      header: 'Resultado',
+      header: withInfo('Resultado', TOOLTIPS.resultadoColumna),
       numeric: true,
       render: (_v, row) => <ResultCell value={row.marginAbsolute} />,
     },
@@ -897,7 +910,10 @@ function RentabilidadKpi({
         : negative
           ? 'var(--danger)'
           : undefined
-  const label = scope === 'año' ? 'Rentabilidad anual' : 'Rentabilidad del mes'
+  const label =
+    scope === 'año'
+      ? withInfo('Rentabilidad anual', TOOLTIPS.rentabilidadAnual)
+      : withInfo('Rentabilidad del mes', TOOLTIPS.rentabilidadMes)
   const meta =
     data.totalHoras === 0
       ? 'sin datos'

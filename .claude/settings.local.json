@@ -10,7 +10,8 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(npx tsc *)",
-      "Bash(grep -n \"return {\\\\s*$\" /Users/bautista/bp-manager-v2/src/lib/calculations.ts)"
+      "Bash(grep -n \"return {\\\\s*$\" /Users/bautista/bp-manager-v2/src/lib/calculations.ts)",
+      "Bash(ps *)"
     ]
   }
 }
