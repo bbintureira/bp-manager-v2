@@ -514,7 +514,11 @@ export function DashboardProyectos() {
               fullValue={formatCurrency(data.costs)}
               meta={`${data.snapshot.brandPartners.length} BPs en plantilla`}
             />
-            <RentabilidadKpi data={data.rentabilidad} scope="mes" />
+            <RentabilidadKpi
+              total={data.revenue - data.costs}
+              data={data.rentabilidad}
+              scope="mes"
+            />
             <KpiCard
               label={withInfo('Margen bruto', TOOLTIPS.margenBruto)}
               value={formatPercent(data.marginPercent)}
@@ -539,7 +543,11 @@ export function DashboardProyectos() {
               fullValue={formatCurrency(data.kpis.costs)}
               meta={`${data.snapshot.brandPartners.length} BPs en plantilla`}
             />
-            <RentabilidadKpi data={data.rentabilidad} scope="año" />
+            <RentabilidadKpi
+              total={data.kpis.revenue - data.kpis.costs}
+              data={data.rentabilidad}
+              scope="año"
+            />
             <KpiCard
               label={withInfo('Margen anual', TOOLTIPS.margenAnual)}
               value={formatPercent(data.kpis.marginPercent)}
@@ -891,17 +899,23 @@ function TopBpsList({ summaries }: { summaries: ProjectMonthSummary[] }) {
 }
 
 function RentabilidadKpi({
+  total,
   data,
   scope,
 }: {
+  /** Displayed amount = Ingresos − Costo. Single source of truth shared
+   *  with the "Margen" KPI subtitle. */
+  total: number
+  /** Per-project breakdown — used only for the meta line (rentables /
+   *  pierden) and to detect the "no data" state. */
   data: AggregatedRentabilidad
   scope: 'mes' | 'año'
 }) {
-  const positive = data.total > 0
-  const negative = data.total < 0
+  const positive = total > 0
+  const negative = total < 0
   const sign = positive ? '+' : negative ? '−' : ''
-  const display = `${sign}${formatCompactCurrency(Math.abs(data.total))}`
-  const fullValue = `${sign}${formatCurrency(Math.abs(data.total))}`
+  const display = `${sign}${formatCompactCurrency(Math.abs(total))}`
+  const fullValue = `${sign}${formatCurrency(Math.abs(total))}`
   const color =
     data.totalHoras === 0
       ? undefined

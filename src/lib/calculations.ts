@@ -745,9 +745,11 @@ export function summarizeProjectsAnnual(
         horasMensuales
       )
     )
-    // Only sum the months where the project actually has BPs assigned —
-    // empty / future months drop out instead of zero-inflating the totals.
-    const months = byMonth.filter((m) => m.bps > 0)
+    // Only sum the months where the project actually has BPs doing work
+    // (horas > 0). Empty / future months — and stale 0-hour asignaciones
+    // — drop out instead of zero-inflating the totals. Keeps the row's
+    // Ingresos in sync with the annual KPI which uses the same rule.
+    const months = byMonth.filter((m) => m.totalHoras > 0)
     const revenue = months.reduce((s, x) => s + x.revenue, 0)
     const cost = months.reduce((s, x) => s + x.cost, 0)
     const totalHoras = months.reduce((s, x) => s + x.totalHoras, 0)
@@ -842,11 +844,41 @@ export function calculateProyectosAnnualKpis(
   sueldos: Sueldo[],
   honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[]
 ): ProyectosAnnualKpis {
-  const revenue = MONTHS.reduce(
-    (s, m) =>
-      s + calculateMonthlyRevenue(proyectos, asignaciones, m, honorariosMensuales),
-    0
-  )
+  // Revenue counts each (proyecto, mes) cell only when that project has at
+  // least one BP doing actual work that month. Months without active BPs
+  // drop out so the annual KPI stays in sync with the per-project rows
+  // (see `summarizeProjectsAnnual`'s `m.totalHoras > 0` filter).
+  const activeProjectMonths = new Set<string>()
+  for (const a of asignaciones) {
+    if (num(a.horas) > 0) {
+      activeProjectMonths.add(`${String(a.proyecto_id)}::${Number(a.mes)}`)
+    }
+  }
+  const honByKey = new Map<string, number>()
+  if (honorariosMensuales) {
+    for (const h of honorariosMensuales) {
+      honByKey.set(
+        `${String(h.proyecto_id)}::${Number(h.mes)}`,
+        num(h.honorarios)
+      )
+    }
+  }
+  let revenue = 0
+  for (const p of proyectos) {
+    if ((p.status ?? '').toLowerCase() === 'finalizado') continue
+    const scalar =
+      p.precio_mensual != null
+        ? num(p.precio_mensual)
+        : num(p.honorarios_cotizador)
+    for (let m = 1; m <= 12; m++) {
+      const key = `${String(p.id)}::${m}`
+      if (!activeProjectMonths.has(key)) continue
+      const value = honByKey.has(key)
+        ? (honByKey.get(key) as number)
+        : scalar
+      revenue += Math.max(0, value)
+    }
+  }
   const costs = MONTHS.reduce(
     (s, m) => s + calculateBPCosts(asignaciones, sueldos, m),
     0
