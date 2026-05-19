@@ -300,7 +300,7 @@ export function AsignacionesPage() {
       setAllBpRows(bpRows)
 
       // Rentabilidad summary using the new model.
-      const renta = summarizeAllProjectsRentabilidad(ps, asignaciones, bps)
+      const renta = summarizeAllProjectsRentabilidad(ps, asignaciones, bps, sueldos)
       const rentaMap = new Map(renta.map((r) => [String(r.proyecto.id), r]))
       setRentaByProyecto(rentaMap)
     } catch (e) {

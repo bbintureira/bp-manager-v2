@@ -50,18 +50,14 @@ import {
   formatPercent,
 } from '@/lib/format'
 import {
-  calculateBPCosts,
   calculateMargin,
-  calculateMonthlyRevenue,
   aggregateRentabilidad,
-  calculateProyectosAnnualKpis,
   summarizeAllProjects,
   summarizeAllProjectsRentabilidad,
   summarizeProjectsAnnual,
   type AggregatedRentabilidad,
   type ProjectAnnualSummary,
   type ProjectMonthSummary,
-  type ProyectosAnnualKpis,
 } from '@/lib/calculations'
 import {
   deleteProyecto,
@@ -118,9 +114,6 @@ function statusVariantFor(raw: string | null | undefined): {
 interface MonthlyData {
   mode: 'monthly'
   snapshot: DashboardSnapshot
-  revenue: number
-  costs: number
-  marginPercent: number
   projectSummaries: ProjectMonthSummary[]
   rentabilidad: AggregatedRentabilidad
 }
@@ -128,7 +121,8 @@ interface MonthlyData {
 interface AnnualData {
   mode: 'annual'
   snapshot: AnnualSnapshot
-  kpis: ProyectosAnnualKpis
+  /** Distinct projects with at least one asignacion in the year. */
+  activeProjects: number
   projects: ProjectAnnualSummary[]
   rentabilidad: AggregatedRentabilidad
 }
@@ -136,28 +130,19 @@ interface AnnualData {
 type PageData = MonthlyData | AnnualData
 
 function deriveMonthly(snapshot: DashboardSnapshot, mes: number): MonthlyData {
-  const revenue = calculateMonthlyRevenue(
-    snapshot.proyectos,
-    snapshot.asignaciones,
-    mes,
-    snapshot.honorariosMensuales
-  )
-  const costs = calculateBPCosts(snapshot.asignaciones, snapshot.sueldos, mes)
   // Rentabilidad uses month-scoped asignaciones to match the displayed mes.
   const monthAsignaciones = snapshot.asignaciones.filter((a) => a.mes === mes)
   const rentabilidad = aggregateRentabilidad(
     summarizeAllProjectsRentabilidad(
       snapshot.proyectos,
       monthAsignaciones,
-      snapshot.brandPartners
+      snapshot.brandPartners,
+      snapshot.sueldos
     )
   )
   return {
     mode: 'monthly',
     snapshot,
-    revenue,
-    costs,
-    marginPercent: calculateMargin(revenue, costs),
     projectSummaries: summarizeAllProjects(
       snapshot.proyectos,
       snapshot.asignaciones,
@@ -176,19 +161,17 @@ function deriveAnnual(snapshot: AnnualSnapshot): AnnualData {
     summarizeAllProjectsRentabilidad(
       snapshot.proyectos,
       snapshot.asignaciones,
-      snapshot.brandPartners
+      snapshot.brandPartners,
+      snapshot.sueldos
     )
   )
+  const activeProjects = new Set(
+    snapshot.asignaciones.map((a) => String(a.proyecto_id))
+  ).size
   return {
     mode: 'annual',
     snapshot,
-    kpis: calculateProyectosAnnualKpis(
-      snapshot.proyectos,
-      snapshot.brandPartners,
-      snapshot.asignaciones,
-      snapshot.sueldos,
-      snapshot.honorariosMensuales
-    ),
+    activeProjects,
     projects: summarizeProjectsAnnual(
       snapshot.proyectos,
       snapshot.asignaciones,
@@ -332,10 +315,18 @@ export function DashboardProyectos() {
       })
   }, [data, passesFilters])
 
-  // Annual KPI totals: sum the values shown in the table rows so the
-  // KPIs always match what the user sees below. Computing this here
-  // (instead of in `calculateProyectosAnnualKpis`) also means the KPIs
-  // follow the active search / tipo filters.
+  // KPI totals: sum from the table rows so the headline numbers always
+  // match what's visible below and follow the active search / tipo
+  // filters. Cost uses the per-asignacion model (horas × sueldo[mes]/cap)
+  // — never full sueldos or scalar rates.
+  const monthlyTotals = useMemo(() => {
+    const revenue = monthlyActive.reduce((s, r) => s + r.revenue, 0)
+    const costs = monthlyActive.reduce((s, r) => s + r.cost, 0)
+    const margin = revenue - costs
+    const marginPercent = calculateMargin(revenue, costs)
+    return { revenue, costs, margin, marginPercent }
+  }, [monthlyActive])
+
   const annualTotals = useMemo(() => {
     const revenue = annualActive.reduce((s, r) => s + r.revenue, 0)
     const costs = annualActive.reduce((s, r) => s + r.cost, 0)
@@ -516,27 +507,27 @@ export function DashboardProyectos() {
           <>
             <KpiCard
               label="Ingresos del mes"
-              value={formatCompactCurrency(data.revenue)}
-              fullValue={formatCurrency(data.revenue)}
+              value={formatCompactCurrency(monthlyTotals.revenue)}
+              fullValue={formatCurrency(monthlyTotals.revenue)}
               meta={`${monthlyActive.length} proyectos activos`}
             />
             <KpiCard
               label="Costo de BPs"
-              value={formatCompactCurrency(data.costs)}
-              fullValue={formatCurrency(data.costs)}
+              value={formatCompactCurrency(monthlyTotals.costs)}
+              fullValue={formatCurrency(monthlyTotals.costs)}
               meta={`${data.snapshot.brandPartners.length} BPs en plantilla`}
             />
             <RentabilidadKpi
-              total={data.revenue - data.costs}
+              total={monthlyTotals.margin}
               data={data.rentabilidad}
               scope="mes"
             />
             <KpiCard
               label={withInfo('Margen bruto', TOOLTIPS.margenBruto)}
-              value={formatPercent(data.marginPercent)}
+              value={formatPercent(monthlyTotals.marginPercent)}
               meta={
-                data.revenue > 0
-                  ? `${formatCompactCurrency(data.revenue - data.costs)} netos`
+                monthlyTotals.revenue > 0
+                  ? `${formatCompactCurrency(monthlyTotals.margin)} netos`
                   : 'sin datos'
               }
             />
@@ -547,7 +538,7 @@ export function DashboardProyectos() {
               label="Ingresos del año"
               value={formatCompactCurrency(annualTotals.revenue)}
               fullValue={formatCurrency(annualTotals.revenue)}
-              meta={`${data.kpis.activeProjects} proyectos con horas`}
+              meta={`${data.activeProjects} proyectos con horas`}
             />
             <KpiCard
               label="Costo de BPs (año)"

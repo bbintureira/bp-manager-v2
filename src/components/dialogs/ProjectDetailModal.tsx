@@ -40,7 +40,6 @@ import {
 } from '@/lib/format'
 import { getProjectDetailFull, type Proyecto } from '@/lib/queries'
 import { displaySeniority } from '@/lib/seniority'
-import { costoHoraBP } from '@/lib/calculations'
 import type {
   BPProjectEstado,
   ProjectBPBreakdown,
@@ -443,6 +442,7 @@ function ProjectMensualView({
       costo: b.costosPorMes[i] ?? 0,
       ingresoRef: b.ingresosPorMes[i] ?? 0,
       ratePerHourProyecto: b.ratePerHourProyecto,
+      ratePerHourBp: b.ratePerHourBpPorMes[i] ?? 0,
     }))
     .filter((b) => b.horas > 0 || b.costo > 0)
     .sort((a, b) => b.horas - a.horas)
@@ -577,11 +577,9 @@ function ProjectMensualView({
               </thead>
               <tbody>
                 {bpsDelMes.map((b) => {
-                  // BP rate is a fixed property of the BP — sueldo / cap —
-                  // not derived from how many hours they have on this
-                  // project (costo / horas would only equal sueldo/cap if
-                  // the cost formula used cap as divisor, but it uses 160).
-                  const ratePerHourBp = b.bp ? costoHoraBP(b.bp) : 0
+                  // BP rate for this specific mes: sueldo[mes] / cap_bp
+                  // (pre-computed in buildBPsForProject).
+                  const ratePerHourBp = b.ratePerHourBp
                   const m = b.ingresoRef - b.costo
                   return (
                     <tr
@@ -765,10 +763,9 @@ function BPsMarginTable({ bps }: { bps: ProjectBPBreakdown[] }) {
               })}
               <Td numeric>{formatCurrency(b.ratePerHourProyecto, 2)}</Td>
               <Td numeric>
-                {(() => {
-                  const rate = b.bp ? costoHoraBP(b.bp) : 0
-                  return rate > 0 ? formatCurrency(rate, 2) : '—'
-                })()}
+                {b.ratePerHourBpAvg > 0
+                  ? formatCurrency(b.ratePerHourBpAvg, 2)
+                  : '—'}
               </Td>
               <Td numeric>
                 <MarginPct value={b.marginPercent} />

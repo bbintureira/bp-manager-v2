@@ -42,7 +42,11 @@ export interface BrandPartner {
   grouper_id: string | null
   /** Joined `groupers.nombre` — populated by reads that select the relation. */
   grouper: string | null
-  /** New profitability model: BP's monthly salary baseline. */
+  /** Denormalized cache: NewBPDialog / EditBPDialog write this as the
+   *  AVG of monthly sueldos. Do NOT use for per-month rate calculations
+   *  (it returns an annual average disguised as a "monthly" salary).
+   *  The `sueldos` table is the source of truth for per-month sueldos;
+   *  see `valorHoraBPForMonth` in calculations.ts. */
   sueldo_mensual: number | null
   /** New profitability model: hours the BP can work per month (default 160). */
   capacidad_horas_mensual: number | null

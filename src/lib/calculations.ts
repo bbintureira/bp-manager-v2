@@ -35,24 +35,6 @@ export function valorHoraProyecto(p: Proyecto): number {
   return precio / horas
 }
 
-/** BP's per-hour cost: sueldo_mensual / capacidad_horas_mensual.
- * Capacity defaults to 160 if not set. Returns 0 when no sueldo on file. */
-export function costoHoraBP(bp: BrandPartner): number {
-  const sueldo = bp.sueldo_mensual != null ? Number(bp.sueldo_mensual) : 0
-  const cap =
-    bp.capacidad_horas_mensual != null
-      ? Number(bp.capacidad_horas_mensual)
-      : HOURS_PER_MONTH
-  if (!Number.isFinite(sueldo) || sueldo <= 0) return 0
-  if (!Number.isFinite(cap) || cap <= 0) return 0
-  return sueldo / cap
-}
-
-/** Per-hour difference (project value - BP cost). Positive = profit. */
-export function diferenciaPorHora(p: Proyecto, bp: BrandPartner): number {
-  return valorHoraProyecto(p) - costoHoraBP(bp)
-}
-
 export interface ProjectRentabilidadSummary {
   proyecto: Proyecto
   /** valor_hora_proyecto = precio_mensual / horas_requeridas_mensual. */
@@ -82,7 +64,8 @@ export interface ProjectRentabilidadSummary {
 export function summarizeProjectRentabilidad(
   proyecto: Proyecto,
   asignaciones: Asignacion[],
-  brandPartners: BrandPartner[]
+  brandPartners: BrandPartner[],
+  sueldos: Sueldo[]
 ): ProjectRentabilidadSummary {
   const own = asignaciones.filter((a) => same(a.proyecto_id, proyecto.id))
   const totalHoras = own.reduce((s, a) => s + num(a.horas), 0)
@@ -92,7 +75,9 @@ export function summarizeProjectRentabilidad(
   for (const a of own) {
     const bp = bpMap.get(String(a.bp_id))
     if (!bp) continue
-    weightedCost += costoHoraBP(bp) * num(a.horas)
+    // Per-month rate (sueldo[mes] / cap_bp) — using the asignacion's mes
+    // so monthly sueldo variations and BP capacities are respected.
+    weightedCost += valorHoraBPForMonth(bp, sueldos, a.mes) * num(a.horas)
   }
   const costoHoraPromedioBps =
     totalHoras > 0 ? weightedCost / totalHoras : 0
@@ -113,10 +98,11 @@ export function summarizeProjectRentabilidad(
 export function summarizeAllProjectsRentabilidad(
   proyectos: Proyecto[],
   asignaciones: Asignacion[],
-  brandPartners: BrandPartner[]
+  brandPartners: BrandPartner[],
+  sueldos: Sueldo[]
 ): ProjectRentabilidadSummary[] {
   return proyectos.map((p) =>
-    summarizeProjectRentabilidad(p, asignaciones, brandPartners)
+    summarizeProjectRentabilidad(p, asignaciones, brandPartners, sueldos)
   )
 }
 
@@ -206,143 +192,6 @@ function inActiveWindow(
 // ---------------------------------------------------------------------------
 
 /**
- * Booked monthly revenue: sum across all projects of what the project
- * "bills" that month. Reads from `proyecto_honorarios_mensuales` if rows
- * are provided; otherwise falls back to `proyecto.precio_mensual`
- * (or `honorarios_cotizador`) — the scalar billed-per-month value.
- *
- * NOTE: this is intentionally not "earned" revenue (hours × $/h). For an
- * Always-On contract you bill the same amount whether or not the BP
- * worked, so the dashboard surfaces the booked figure.
- *
- * Filters out projects with `status === 'finalizado'` so closed deals
- * stop contributing.
- */
-export function calculateMonthlyRevenue(
-  proyectos: Proyecto[],
-  _asignaciones: Asignacion[], // kept for signature compat; not used.
-  mes: number,
-  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[]
-): number {
-  void _asignaciones
-  // Per-project booked amount for `mes`: prefer the per-month row, else
-  // the project scalar.
-  const byProyectoMes = new Map<string, number>()
-  if (honorariosMensuales) {
-    for (const h of honorariosMensuales) {
-      if (h.mes === mes) {
-        byProyectoMes.set(String(h.proyecto_id), num(h.honorarios))
-      }
-    }
-  }
-  return proyectos.reduce((acc, p) => {
-    if ((p.status ?? '').toLowerCase() === 'finalizado') return acc
-    const fromTable = byProyectoMes.get(String(p.id))
-    const scalar =
-      p.precio_mensual != null
-        ? num(p.precio_mensual)
-        : num(p.honorarios_cotizador)
-    const value = fromTable !== undefined ? fromTable : scalar
-    return acc + Math.max(0, value)
-  }, 0)
-}
-
-/**
- * Cost of the BPs that worked this month — sum of full sueldos for any
- * BP that has at least one assignment in `mes`.
- *
- * Note: a BP with sueldo but no assignments contributes 0; a BP assigned
- * but with no sueldo row also contributes 0.
- */
-export function calculateBPCosts(
-  asignaciones: Asignacion[],
-  sueldos: Sueldo[],
-  mes: number
-): number {
-  const assignedBpIds = new Set(
-    asignaciones.filter((a) => a.mes === mes).map((a) => String(a.bp_id))
-  )
-  return sueldos
-    .filter((s) => s.mes === mes && assignedBpIds.has(String(s.bp_id)))
-    .reduce((acc, s) => acc + num(s.sueldo), 0)
-}
-
-/**
- * Annual idle hours across the BP roster, using the same "only months
- * with at least one asignacion" rule as `bpHorasAnnualAggregate`:
- *
- *   idle_bp = (monthsWithAsig × capacidad) - Σ horas_asignadas_bp
- *   total   = Σ over BPs of idle_bp
- *
- * Months without any asignacion don't add capacity to the denominator,
- * so the figure stays in sync with the per-BP annual rows.
- */
-export function calculateAnnualIdleHours(
-  brandPartners: BrandPartner[],
-  asignaciones: Asignacion[],
-  sueldos: Sueldo[] = []
-): number {
-  let total = 0
-  for (const bp of brandPartners) {
-    const mesIngreso = getMesIngreso(bp)
-    const mesEgreso = getMesEgreso(bp, sueldos)
-    const capacidad =
-      bp.capacidad_horas_mensual != null && num(bp.capacidad_horas_mensual) > 0
-        ? num(bp.capacidad_horas_mensual)
-        : HOURS_PER_MONTH
-    const monthsWithAsig = new Set<number>()
-    let asignadas = 0
-    for (const a of asignaciones) {
-      if (!same(a.bp_id, bp.id)) continue
-      const m = Number(a.mes)
-      if (!Number.isFinite(m) || m < mesIngreso || m > mesEgreso) continue
-      const h = num(a.horas)
-      if (h <= 0) continue
-      monthsWithAsig.add(m)
-      asignadas += h
-    }
-    const contratadas = monthsWithAsig.size * capacidad
-    total += Math.max(0, contratadas - asignadas)
-  }
-  return total
-}
-
-/**
- * Idle hours across the BP roster for the month. For each BP we compute
- * `max(0, capacidad - Σ horas en ese mes)` and add them up. BPs missing
- * entirely from `brandPartners` are not counted. BPs outside their
- * `[ingreso, egreso]` window contribute 0 idle hours (they weren't on
- * the team yet, or already left).
- *
- * Note: this is the per-month figure. For the annual total prefer
- * `calculateAnnualIdleHours` — summing this per-mes over the year
- * over-counts because months without any asignacion still contribute
- * full capacity here.
- */
-export function calculateIdleHours(
-  brandPartners: BrandPartner[],
-  asignaciones: Asignacion[],
-  mes: number,
-  sueldos: Sueldo[] = []
-): number {
-  const usedByBp = new Map<string, number>()
-  for (const a of asignaciones) {
-    if (a.mes !== mes) continue
-    const key = String(a.bp_id)
-    usedByBp.set(key, (usedByBp.get(key) ?? 0) + num(a.horas))
-  }
-  return brandPartners.reduce((acc, bp) => {
-    if (!inActiveWindow(bp, mes, sueldos)) return acc
-    const capacidad =
-      bp.capacidad_horas_mensual != null
-        ? num(bp.capacidad_horas_mensual)
-        : HOURS_PER_MONTH
-    const used = usedByBp.get(String(bp.id)) ?? 0
-    return acc + Math.max(0, capacidad - used)
-  }, 0)
-}
-
-/**
  * Overall margin %. Returns 0 if revenue is non-positive (rather than
  * NaN / Infinity) so the UI doesn't blow up on empty months.
  */
@@ -363,27 +212,21 @@ export interface ProjectMonthSummary {
   totalHoras: number
   /** Avg utilization across the project's BPs (0–110+). */
   utilization: number
-  /** Project's per-hour rate: honorarios / 160. */
+  /** Project's per-hour rate for `mes`: honorarios[mes] / horas_req[mes]. */
   projectRate: number
-  /** Mean of per-hour rates of the BPs assigned (sueldo / 160). */
+  /** Mean of per-hour BP rates for `mes` (each is sueldo[mes] / cap_bp). */
   avgBpRate: number
   /** Earned revenue for this project in `mes`. */
   revenue: number
   /**
-   * Project cost — sum of full sueldos of the BPs that worked here, per
-   * spec. NOTE: this overstates total cost if a BP is split across
-   * multiple projects, since the same sueldo will be counted in each.
-   * Use only when you want a per-project view; do NOT sum across all
-   * projects to derive company costs (use `calculateBPCosts` for that).
+   * Project cost — Σ asignacion horas × (sueldo[mes] / cap_bp). Uses the
+   * per-month sueldo and the BP's contracted hours, so it accurately
+   * reflects the cost of the assigned hours (not the full sueldo).
    */
   cost: number
   /** revenue - cost (in pesos). */
   marginAbsolute: number
-  /**
-   * Per-hour margin: (projectRate - avgBpRate) / projectRate * 100.
-   * This is what we surface in the table because it ties cleanly to the
-   * `$/h proyecto` and `$/h BP prom.` columns next to it.
-   */
+  /** (revenue - cost) / revenue × 100. 0 when revenue ≤ 0. */
   marginPercent: number
 }
 
@@ -396,13 +239,12 @@ export interface ProjectMonthSummary {
 export function calculateProjectMargin(
   proyecto: Proyecto,
   asignaciones: Asignacion[],
-  _sueldos: Sueldo[],
+  sueldos: Sueldo[],
   mes: number,
   brandPartners?: BrandPartner[],
   honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[],
   horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[]
 ): ProjectMonthSummary {
-  void _sueldos
   const own = asignaciones.filter(
     (a) => a.mes === mes && same(a.proyecto_id, proyecto.id)
   )
@@ -419,14 +261,15 @@ export function calculateProjectMargin(
     horasMensuales ?? []
   )
 
-  // Per-BP rate via the profitability model (sueldo / capacidad).
+  // Per-BP rate via the per-month profitability model: sueldo[mes] / cap_bp.
+  // Uses the actual sueldo row for the selected mes (not the scalar avg).
   const bpsById = new Map(
     (brandPartners ?? []).map((bp) => [String(bp.id), bp])
   )
   const bpRateById = new Map<string, number>()
   for (const id of bpIds) {
     const bp = bpsById.get(id)
-    bpRateById.set(id, bp ? costoHoraBP(bp) : 0)
+    bpRateById.set(id, bp ? valorHoraBPForMonth(bp, sueldos, mes) : 0)
   }
 
   // Average BP rate across the BPs assigned this month — used only for the
@@ -568,66 +411,6 @@ export function summarizeAllBPs(
   return brandPartners.map((bp) =>
     calculateBPSummary(bp, asignaciones, sueldos, mes)
   )
-}
-
-// ---------------------------------------------------------------------------
-// Asignacion row joins (used in /gestión/asignaciones)
-// ---------------------------------------------------------------------------
-
-export interface AsignacionJoinedRow {
-  asignacion: Asignacion
-  proyecto: Proyecto | null
-  bp: BrandPartner | null
-  sueldoRow: Sueldo | null
-  /** Project per-hour rate: honorarios / 160 (0 when project unknown). */
-  rateProyecto: number
-  /** BP per-hour rate: sueldo / 160 (0 when no sueldo for that mes). */
-  rateBP: number
-  /** Per-hour margin: (rate_p - rate_bp) / rate_p * 100. */
-  marginPercent: number
-  /** Earned amount for this asignacion in pesos. */
-  monto: number
-}
-
-/**
- * Join asignaciones with their proyecto / bp / sueldo rows. The sueldo is
- * matched on (bp_id, mes); if there's no matching row, rateBP is 0 and
- * the margin reflects "100% of the project rate" (meaning we can't price
- * this BP yet).
- */
-export function joinAsignaciones(
-  asignaciones: Asignacion[],
-  proyectos: Proyecto[],
-  brandPartners: BrandPartner[],
-  sueldos: Sueldo[]
-): AsignacionJoinedRow[] {
-  const projectMap = new Map(proyectos.map((p) => [String(p.id), p]))
-  const bpMap = new Map(brandPartners.map((b) => [String(b.id), b]))
-  const sueldoMap = new Map(
-    sueldos.map((s) => [`${String(s.bp_id)}::${s.mes}`, s])
-  )
-  return asignaciones.map((a) => {
-    const proyecto = projectMap.get(String(a.proyecto_id)) ?? null
-    const bp = bpMap.get(String(a.bp_id)) ?? null
-    const sueldoRow = sueldoMap.get(`${String(a.bp_id)}::${a.mes}`) ?? null
-    const rateProyecto = proyecto
-      ? valorHoraProyecto(proyecto)
-      : 0
-    const rateBP = sueldoRow ? num(sueldoRow.sueldo) / HOURS_PER_MONTH : 0
-    const marginPercent =
-      rateProyecto > 0 ? ((rateProyecto - rateBP) / rateProyecto) * 100 : 0
-    const monto = rateProyecto * num(a.horas)
-    return {
-      asignacion: a,
-      proyecto,
-      bp,
-      sueldoRow,
-      rateProyecto,
-      rateBP,
-      marginPercent,
-      monto,
-    }
-  })
 }
 
 // ---------------------------------------------------------------------------
@@ -828,80 +611,6 @@ export function summarizeBPsAnnual(
   })
 }
 
-/** Top-level annual KPIs for the Proyectos dashboard. */
-export interface ProyectosAnnualKpis {
-  revenue: number
-  costs: number
-  marginPercent: number
-  idleHours: number
-  activeProjects: number
-}
-
-export function calculateProyectosAnnualKpis(
-  proyectos: Proyecto[],
-  brandPartners: BrandPartner[],
-  asignaciones: Asignacion[],
-  sueldos: Sueldo[],
-  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[]
-): ProyectosAnnualKpis {
-  // Revenue counts each (proyecto, mes) cell only when that project has at
-  // least one BP doing actual work that month. Months without active BPs
-  // drop out so the annual KPI stays in sync with the per-project rows
-  // (see `summarizeProjectsAnnual`'s `m.totalHoras > 0` filter).
-  const activeProjectMonths = new Set<string>()
-  for (const a of asignaciones) {
-    if (num(a.horas) > 0) {
-      activeProjectMonths.add(`${String(a.proyecto_id)}::${Number(a.mes)}`)
-    }
-  }
-  const honByKey = new Map<string, number>()
-  if (honorariosMensuales) {
-    for (const h of honorariosMensuales) {
-      honByKey.set(
-        `${String(h.proyecto_id)}::${Number(h.mes)}`,
-        num(h.honorarios)
-      )
-    }
-  }
-  let revenue = 0
-  for (const p of proyectos) {
-    if ((p.status ?? '').toLowerCase() === 'finalizado') continue
-    const scalar =
-      p.precio_mensual != null
-        ? num(p.precio_mensual)
-        : num(p.honorarios_cotizador)
-    for (let m = 1; m <= 12; m++) {
-      const key = `${String(p.id)}::${m}`
-      if (!activeProjectMonths.has(key)) continue
-      const value = honByKey.has(key)
-        ? (honByKey.get(key) as number)
-        : scalar
-      revenue += Math.max(0, value)
-    }
-  }
-  const costs = MONTHS.reduce(
-    (s, m) => s + calculateBPCosts(asignaciones, sueldos, m),
-    0
-  )
-  // Annual idle uses the "months with asignaciones × capacidad" rule so
-  // the dashboard total matches the per-BP rows shown elsewhere.
-  const idleHours = calculateAnnualIdleHours(
-    brandPartners,
-    asignaciones,
-    sueldos
-  )
-  const activeProjects = new Set(
-    asignaciones.map((a) => String(a.proyecto_id))
-  ).size
-  return {
-    revenue,
-    costs,
-    marginPercent: calculateMargin(revenue, costs),
-    idleHours,
-    activeProjects,
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Distribution breakdowns (used by the rich detail modals)
 // ---------------------------------------------------------------------------
@@ -924,8 +633,13 @@ export interface ProjectBPBreakdown {
    *  `honorarios_mes / horas_requeridas_mensual` over months with data.
    *  Same for every row in the project. */
   ratePerHourProyecto: number
-  /** Effective per-hour BP rate, weighted across the months they actually worked. */
+  /** Effective per-hour BP rate, weighted by hours actually worked:
+   *  `Σ horas[m] × (sueldo[m]/cap_bp) / Σ horas[m]`. Stays consistent
+   *  with `costosAnuales`. */
   ratePerHourBpAvg: number
+  /** Per-month per-hour BP rate (length 12): `sueldo[m] / cap_bp`.
+   *  0 in months with no sueldo on file. */
+  ratePerHourBpPorMes: number[]
   /** Reference value of this BP's hours at the project's contractual rate:
    *  `Σ_mes horas_bp[m] × (honorarios[m] / horas_requeridas_mensual)`.
    *  Not a real income figure — compared to `costosAnuales` it answers
@@ -933,9 +647,10 @@ export interface ProjectBPBreakdown {
   ingresosAnuales: number
   /** Per-month reference ingreso (length 12): `horas_bp[m] × honorarios[m] / horas_req`. */
   ingresosPorMes: number[]
-  /** Yearly cost the BP represents on the project: Σ horas[mes] × sueldo[mes]/160. */
+  /** Yearly cost the BP represents on the project:
+   *  `Σ horas[mes] × (sueldo[mes] / cap_bp)`. */
   costosAnuales: number
-  /** Per-month cost (length 12): `horas_bp[m] × sueldo_bp[m] / 160`. */
+  /** Per-month cost (length 12): `horas_bp[m] × sueldo_bp[m] / cap_bp`. */
   costosPorMes: number[]
   /** (ingresos - costos) / ingresos × 100. 0 if ingresos ≤ 0. */
   marginPercent: number
@@ -1026,7 +741,13 @@ export function buildBPsForProject(
       totalProject > 0 ? (totalHoras / totalProject) * 100 : 0
     const bp = bpMap.get(bpId) ?? null
 
-    // Cost = Σ horas[mes] × (sueldo[mes] / 160). Sueldo varies per month.
+    // BP's contracted hours (capacidad). Falls back to 160 if not set —
+    // matches the canonical formula used in `valorHoraBPForMonth`.
+    const capBp =
+      bp && bp.capacidad_horas_mensual != null && num(bp.capacidad_horas_mensual) > 0
+        ? num(bp.capacidad_horas_mensual)
+        : HOURS_PER_MONTH
+    // Cost = Σ horas[mes] × (sueldo[mes] / cap_bp). Sueldo varies per month.
     const sueldoByMes = new Map<number, number>()
     let totalSueldo = 0
     for (const s of sueldos) {
@@ -1036,10 +757,13 @@ export function buildBPsForProject(
     }
     const costosPorMes = new Array(12).fill(0) as number[]
     const ingresosPorMes = new Array(12).fill(0) as number[]
+    const ratePerHourBpPorMes = new Array(12).fill(0) as number[]
     for (let i = 0; i < 12; i++) {
       const horas = horasPorMes[i]
       const sueldo = sueldoByMes.get(i + 1) ?? 0
-      costosPorMes[i] = horas * (sueldo / HOURS_PER_MONTH)
+      const rateBp = capBp > 0 && sueldo > 0 ? sueldo / capBp : 0
+      ratePerHourBpPorMes[i] = rateBp
+      costosPorMes[i] = horas * rateBp
       // Ingreso de referencia per month: BP's hours × project rate for that month.
       ingresosPorMes[i] = horas * ratePerHourProyectoPorMes[i]
     }
@@ -1051,6 +775,7 @@ export function buildBPsForProject(
         : 0
     const estado: BPProjectEstado =
       marginPercent > 20 ? 'rentable' : marginPercent > 0 ? 'neutral' : 'perdida'
+    // Equivalent to Σ horas × rate / Σ horas (weighted avg by hours).
     const ratePerHourBpAvg = totalHoras > 0 ? costosAnuales / totalHoras : 0
 
     rows.push({
@@ -1063,6 +788,7 @@ export function buildBPsForProject(
       totalSueldo,
       ratePerHourProyecto,
       ratePerHourBpAvg,
+      ratePerHourBpPorMes,
       ingresosAnuales,
       ingresosPorMes,
       costosAnuales,
@@ -1112,6 +838,11 @@ export function calculateBPProjectMargin(
     valorHoraProyecto(proyecto)
   const ingresosAnuales = totalHoras * ratePerHourProyecto
 
+  // BP's contracted hours (cap). Matches `valorHoraBPForMonth` rule.
+  const capBp =
+    bp.capacidad_horas_mensual != null && num(bp.capacidad_horas_mensual) > 0
+      ? num(bp.capacidad_horas_mensual)
+      : HOURS_PER_MONTH
   const sueldoByMes = new Map<number, number>()
   for (const s of sueldos) {
     if (same(s.bp_id, bp.id)) sueldoByMes.set(s.mes, num(s.sueldo))
@@ -1120,7 +851,7 @@ export function calculateBPProjectMargin(
   for (let i = 0; i < 12; i++) {
     const horas = horasPorMes[i]
     const sueldo = sueldoByMes.get(i + 1) ?? 0
-    costosAnuales += horas * (sueldo / HOURS_PER_MONTH)
+    costosAnuales += horas * (capBp > 0 ? sueldo / capBp : 0)
   }
   const marginPercent =
     ingresosAnuales > 0
