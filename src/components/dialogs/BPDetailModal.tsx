@@ -37,6 +37,8 @@ import {
   formatPercent,
 } from '@/lib/format'
 import { getAnnualSnapshot, type BrandPartner } from '@/lib/queries'
+import { InfoTooltip } from '@/components/ui/InfoTooltip'
+import { TOOLTIPS } from '@/constants/tooltips'
 import {
   bpHorasMonthRow,
   bpHorasYear,
@@ -641,7 +643,12 @@ function RentabilidadMensual({
           }
         />
         <KpiCard
-          label="Costo real"
+          label={
+            <span className="inline-flex items-center gap-1">
+              Costo real
+              <InfoTooltip text={TOOLTIPS.costoReal} />
+            </span>
+          }
           value={row.costo > 0 ? formatCurrency(row.costo) : '—'}
         />
         <KpiCard

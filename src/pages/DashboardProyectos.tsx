@@ -332,6 +332,18 @@ export function DashboardProyectos() {
       })
   }, [data, passesFilters])
 
+  // Annual KPI totals: sum the values shown in the table rows so the
+  // KPIs always match what the user sees below. Computing this here
+  // (instead of in `calculateProyectosAnnualKpis`) also means the KPIs
+  // follow the active search / tipo filters.
+  const annualTotals = useMemo(() => {
+    const revenue = annualActive.reduce((s, r) => s + r.revenue, 0)
+    const costs = annualActive.reduce((s, r) => s + r.cost, 0)
+    const margin = revenue - costs
+    const marginPercent = calculateMargin(revenue, costs)
+    return { revenue, costs, margin, marginPercent }
+  }, [annualActive])
+
   const topbarActions = (
     <div className="flex items-center gap-2">
       <ViewToggle value={viewMode} onChange={setViewMode} />
@@ -533,27 +545,27 @@ export function DashboardProyectos() {
           <>
             <KpiCard
               label="Ingresos del año"
-              value={formatCompactCurrency(data.kpis.revenue)}
-              fullValue={formatCurrency(data.kpis.revenue)}
+              value={formatCompactCurrency(annualTotals.revenue)}
+              fullValue={formatCurrency(annualTotals.revenue)}
               meta={`${data.kpis.activeProjects} proyectos con horas`}
             />
             <KpiCard
               label="Costo de BPs (año)"
-              value={formatCompactCurrency(data.kpis.costs)}
-              fullValue={formatCurrency(data.kpis.costs)}
+              value={formatCompactCurrency(annualTotals.costs)}
+              fullValue={formatCurrency(annualTotals.costs)}
               meta={`${data.snapshot.brandPartners.length} BPs en plantilla`}
             />
             <RentabilidadKpi
-              total={data.kpis.revenue - data.kpis.costs}
+              total={annualTotals.margin}
               data={data.rentabilidad}
               scope="año"
             />
             <KpiCard
               label={withInfo('Margen anual', TOOLTIPS.margenAnual)}
-              value={formatPercent(data.kpis.marginPercent)}
+              value={formatPercent(annualTotals.marginPercent)}
               meta={
-                data.kpis.revenue > 0
-                  ? `${formatCompactCurrency(data.kpis.revenue - data.kpis.costs)} netos`
+                annualTotals.revenue > 0
+                  ? `${formatCompactCurrency(annualTotals.margin)} netos`
                   : 'sin datos'
               }
             />

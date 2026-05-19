@@ -16,7 +16,7 @@ export const TOOLTIPS = {
 
   // Dashboard BPs — Rentabilidad tab (KPIs)
   margenTotal:
-    'Suma de márgenes de todos los BPs del mes. Positivo significa que el equipo en conjunto generó más de lo que costó.',
+    'Suma de márgenes de todos los BPs del mes. El margen compara el ingreso cotizado contra el costo real de cada BP (no contra el sueldo). Un margen positivo indica que los proyectos asignados cubren el costo de las horas efectivamente trabajadas, pero no necesariamente el sueldo completo.',
   coberturaSalarialTotal:
     'Diferencia entre lo que los proyectos generaron y lo que la agencia pagó en sueldos. Negativo indica cuánto absorbió la agencia sin recuperar.',
   bpsConCostoMayorSueldo:
@@ -26,9 +26,11 @@ export const TOOLTIPS = {
   ingresoCotizado:
     'Lo que el BP generó según la tarifa de cada proyecto asignado. Se calcula como: horas asignadas × (honorario del proyecto ÷ horas requeridas del proyecto).',
   margenColumna:
-    'Ingreso cotizado menos sueldo. Positivo: el BP fue rentable. Negativo: costó más de lo que los proyectos recuperaron.',
+    'Ingreso cotizado menos costo real del BP. El costo real es lo que efectivamente costaron las horas asignadas, no el sueldo completo. Positivo significa que el proyecto cubre el costo de esas horas.',
   coberturaSalarialColumna:
-    'Mismo valor que el margen, pero leído desde el sueldo: cuánto fue cubierto o cuánto quedó sin cubrir.',
+    'Ingreso cotizado menos sueldo. Indica cuánto del sueldo fue cubierto por los proyectos asignados.',
+  costoReal:
+    'Costo efectivo del BP según las horas que tuvo asignadas. Se calcula como: horas asignadas × (sueldo ÷ horas contratadas). Refleja lo que realmente costó el BP ese mes, no su sueldo total.',
 
   // Dashboard Proyectos — Vista mensual (KPIs)
   rentabilidadMes:
@@ -50,7 +52,7 @@ export const TOOLTIPS = {
 
   // Dashboard Proyectos — Vista anual (tabla)
   ingresosColumnaAnual:
-    'Suma de honorarios del proyecto, pero solo de los meses donde tiene BPs asignados. Esto evita inflar los números con meses futuros sin costo asociado.',
+    'Suma de honorarios del proyecto solo en los meses donde tiene BPs asignados. Los meses sin asignaciones no se contabilizan para evitar inflar los ingresos con meses futuros sin costo asociado.',
 } as const
 
 export type TooltipKey = keyof typeof TOOLTIPS
