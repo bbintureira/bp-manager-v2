@@ -259,7 +259,7 @@ export function DashboardBrandPartners() {
           0
         )
         const total = filteredRentabilidad.length
-        // BP "covered" when costo_real ≥ sueldo → coberturaSalarial ≥ 0.
+        // BP "covered" when ingreso_cotizado ≥ sueldo → coberturaSalarial ≥ 0.
         const covered = filteredRentabilidad.filter(
           (r) => r.sueldoMensual > 0 && r.coberturaSalarial >= 0
         ).length
@@ -586,10 +586,10 @@ export function DashboardBrandPartners() {
               label={withInfo('Cobertura salarial total', TOOLTIPS.coberturaSalarialTotal)}
               value={formatCompactCurrency(kpiStats.totalCobertura)}
               fullValue={formatCurrency(kpiStats.totalCobertura)}
-              meta="costo real − sueldo"
+              meta="ingreso − sueldo"
             />
             <KpiCard
-              label={withInfo('% BPs con costo ≥ sueldo', TOOLTIPS.bpsConCostoMayorSueldo)}
+              label={withInfo('% BPs con ingreso ≥ sueldo', TOOLTIPS.bpsConCostoMayorSueldo)}
               value={formatPercent(kpiStats.pctCovered)}
               meta={`${kpiStats.covered} de ${kpiStats.total}`}
             />
@@ -606,10 +606,10 @@ export function DashboardBrandPartners() {
               label={withInfo('Cobertura salarial total', TOOLTIPS.coberturaSalarialTotal)}
               value={formatCompactCurrency(kpiStats.totalCobertura)}
               fullValue={formatCurrency(kpiStats.totalCobertura)}
-              meta="costo real − sueldo (año)"
+              meta="ingreso − sueldo (año)"
             />
             <KpiCard
-              label={withInfo('% BPs con costo ≥ sueldo', TOOLTIPS.bpsConCostoMayorSueldo)}
+              label={withInfo('% BPs con ingreso ≥ sueldo', TOOLTIPS.bpsConCostoMayorSueldo)}
               value={formatPercent(kpiStats.pctCovered)}
               meta={`${kpiStats.covered} de ${kpiStats.total}`}
             />

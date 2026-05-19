@@ -1509,10 +1509,11 @@ export function bpRentabilidadMonthRow(
   const margen = ingresoCotizado - costo
   const margenPercent =
     ingresoCotizado > 0 ? (margen / ingresoCotizado) * 100 : 0
-  // Cobertura salarial: positive when projects recovered more than the
-  // salary paid for the month (BP is fully covered); negative when we're
-  // subsidising idle time.
-  const coberturaSalarial = costo - sueldoMensual
+  // Cobertura salarial: positive when the BP's cotized revenue is at
+  // least their salary (projects pay for the BP); negative when the
+  // agency is absorbing the difference. Compares ingreso vs. sueldo —
+  // NOT costo vs. sueldo (that would measure utilization, not coverage).
+  const coberturaSalarial = ingresoCotizado - sueldoMensual
 
   return {
     bp,
@@ -1628,11 +1629,13 @@ export interface BPRentabilidadAnnualAggregate {
   totalMargen: number
   /** margen / ingreso × 100. */
   margenPercent: number
-  /** Mean monthly sueldo across months with sueldo > 0. */
+  /** Mean monthly sueldo, restricted to months where the BP had at least
+   *  one hour assigned (so empty / future months don't drag the avg). */
   sueldoPromedio: number
-  /** Σ sueldoMensual across months in the BP's active window. */
+  /** Σ sueldoMensual across months where the BP had at least one hour
+   *  assigned — keeps the annual sueldo aligned with annual ingreso. */
   totalSueldo: number
-  /** Σ coberturaSalarial (= totalCosto - totalSueldo). */
+  /** totalIngreso − totalSueldo. */
   totalCoberturaSalarial: number
   /** Per-month margen, indexed 0..11. */
   byMonth: number[]
@@ -1658,15 +1661,33 @@ export function bpRentabilidadAnnualAggregate(
   const totalCosto = year.byMonth.reduce((s, m) => s + m.costo, 0)
   const totalMargen = totalIngreso - totalCosto
   const margenPercent = totalIngreso > 0 ? (totalMargen / totalIngreso) * 100 : 0
-  const sueldosNonZero = year.byMonth
-    .map((m) => m.sueldoMensual)
-    .filter((v) => v > 0)
+  // Months where the BP has at least one hour assigned. Salary aggregations
+  // are restricted to this set so months without activity don't inflate the
+  // annual sueldo while ingreso stays at 0 (would otherwise show a
+  // misleading negative coverage).
+  const monthsWithAsig = new Set<number>()
+  for (const a of asignaciones) {
+    if (!same(a.bp_id, bp.id)) continue
+    const m = Number(a.mes)
+    if (!Number.isFinite(m) || m < 1 || m > 12) continue
+    if (num(a.horas) <= 0) continue
+    monthsWithAsig.add(m)
+  }
+  const sueldosForActiveMonths = year.byMonth
+    .map((row, i) => ({ mes: i + 1, sueldo: row.sueldoMensual }))
+    .filter(({ mes, sueldo }) => monthsWithAsig.has(mes) && sueldo > 0)
   const sueldoPromedio =
-    sueldosNonZero.length === 0
+    sueldosForActiveMonths.length === 0
       ? 0
-      : sueldosNonZero.reduce((s, x) => s + x, 0) / sueldosNonZero.length
-  const totalSueldo = year.byMonth.reduce((s, m) => s + m.sueldoMensual, 0)
-  const totalCoberturaSalarial = totalCosto - totalSueldo
+      : sueldosForActiveMonths.reduce((s, x) => s + x.sueldo, 0) /
+        sueldosForActiveMonths.length
+  const totalSueldo = year.byMonth.reduce(
+    (s, row, i) => (monthsWithAsig.has(i + 1) ? s + row.sueldoMensual : s),
+    0
+  )
+  // ingreso − sueldo: how much of the salary was covered by the cotized
+  // revenue this BP generated across the year.
+  const totalCoberturaSalarial = totalIngreso - totalSueldo
   return {
     bp,
     totalIngreso,
