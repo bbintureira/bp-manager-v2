@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Contexto del proyecto
+
+App web interna de **Project Reset SA/LLC** para gestionar la asignación de horas
+de Brand Partners (BPs) y el análisis financiero del equipo. Reemplaza el viejo
+Excel de P&L ("Pianel"). Equipo chico: Franco (manager), Victoria (CEO),
+Candelaria (Head of Ops). Bautista es admin/owner y único desarrollador.
+
 ## Stack & commands
 
 React 18 + Vite + TypeScript + Tailwind 3 + Supabase. Auth via Supabase Auth, persistence via `@supabase/supabase-js`. Charts via `recharts`. Toast via `sonner`. Dialogs via `@radix-ui/react-dialog`.
@@ -100,12 +107,19 @@ If any is missing, the first upsert returns a clear Postgres error in the toast 
 
 ## Margin math
 
-Two interpretations of "project margin" coexist intentionally:
+Two interpretations of "project margin" coexist intentionally. Both build on two
+per-hour rates that use the new capacity fields, falling back to the legacy `160`
+(`HOURS_PER_MONTH`) **only when the field is `null`**:
 
-1. **Per-hour margin** (used in monthly project rows): `(rate_proyecto - rate_bp_avg) / rate_proyecto × 100`, where `rate_proyecto = honorarios_cotizador / 160`. Quick to scan, ties cleanly to the `$/h proyecto` and `$/h BP prom.` columns.
-2. **Absolute margin** (used in BP-on-project breakdown): `(ingresos - costos) / ingresos × 100`, where ingresos = `total_horas × rate_proyecto` and costos = `Σ horas[mes] × sueldo[mes] / 160`. Captures month-by-month sueldo variation.
+- `rate_proyecto = honorarios[mes] / proyecto.horas_requeridas_mensual` — the
+  per-month variant (`valorHoraProyectoForMonth`) prefers the
+  `proyecto_honorarios_mensuales` / `horas_proyecto` rows, then the scalar, then `160`.
+- `rate_bp = sueldo[mes] / bp.capacidad_horas_mensual` (`valorHoraBPForMonth`).
 
-`calculateProjectMargin` (cost = sum of full sueldos for any BP that touched the project) **overstates cost** when a BP is split across projects, because the same sueldo is counted in each. Don't sum `cost` across projects to derive company costs — use `calculateBPCosts` (deduped by BP) for that.
+1. **Per-hour margin** (used in monthly project rows): `(rate_proyecto - rate_bp_avg) / rate_proyecto × 100`, where `rate_bp_avg` is the mean of `rate_bp` over the BPs assigned that month. Quick to scan, ties cleanly to the `$/h proyecto` and `$/h BP prom.` columns.
+2. **Absolute margin** (used in BP-on-project breakdown): `(ingresos - costos) / ingresos × 100`, where ingresos = `Σ horas[mes] × rate_proyecto[mes]` and costos = `Σ horas[mes] × rate_bp[mes]`. Captures month-by-month sueldo variation.
+
+`calculateProjectMargin` computes cost **per-asignación** (`Σ horas[mes] × rate_bp[mes]`) — only the cost of the hours actually worked on the project, not the BP's full sueldo. A BP split across projects is therefore **not** double-counted: summing a BP's `cost` across its projects stays ≤ its full sueldo (= it when total hours = capacity).
 
 ## Other notes
 
@@ -113,3 +127,61 @@ Two interpretations of "project margin" coexist intentionally:
 - `AsignacionesPage` is project-centric: a topbar `<Select>` picks the project; the body shows a 12-month editable grid for its BPs. Adding a BP locally just appends to in-memory state with 12 zeros — only on Save does it upsert (and all-zero new BPs are skipped to avoid noise rows).
 - The `ProjectHonorarioFullYearModal` (reachable via the "coins" icon in annual view) and the honorarios section inside `EditProjectDialog` are functionally overlapping. Both write to `proyecto_honorarios_mensuales`. Keep them in sync if you change one.
 - Search query persists across navigation (provider sits at App level). If you need per-page reset, watch `useLocation().pathname` and clear inside `SearchProvider`.
+
+## Reglas de lógica de negocio (NO romper)
+
+- **Vista anual:** solo sumar/mostrar meses donde hay al menos un BP asignado.
+  Nunca proyectar hacia meses futuros vacíos, nunca anualizar los 12 meses si el
+  BP arrancó a mitad de año.
+- **`fecha_ingreso` del BP:** los cálculos anuales solo cuentan desde el mes de
+  ingreso en adelante. BPs inactivos se capean al último mes con sueldo cargado.
+- **Filtro de mes:** las listas de proyectos y BPs en vista mensual solo muestran
+  entries con datos para ESE mes específico.
+
+## Workflow de deploy
+
+1. Verificar en localhost: `npm run dev` + ⌘+Shift+R
+2. `git add . && git commit -m "..." && git push`
+3. Vercel auto-deploya desde GitHub en ~30s → `bp-manager-v2.vercel.app`
+   (repo `bbintureira/bp-manager-v2`).
+
+## Convenciones de trabajo
+
+- **Código comentado en inglés**, siempre (aunque el pedido venga en español).
+- Comunicación con el usuario: español rioplatense (voseo), directa y concisa.
+- **MVP-first** para features. EXCEPCIÓN: la seguridad de datos sensibles del
+  equipo no es MVP-first — ahí se va con cuidado.
+
+## Estado actual — Seguridad (EN PAUSA DELIBERADA)
+
+Trabajo de seguridad pausado a propósito. Retomar solo con foco, nunca cansado.
+
+- **RLS (Row Level Security):** el Security Advisor de Supabase marcó todas las
+  tablas con RLS deshabilitado. Hoy la app usa la anon key sin sesión
+  autenticada → si se habilita RLS ahora, la app se ve vacía.
+- **Camino elegido (Opción A):** reactivar Google OAuth + políticas
+  authenticated-only. Es la única opción arquitectónicamente correcta.
+- **Orden estricto y obligatorio:**
+  1. Reactivar y testear el login end-to-end completo.
+  2. Recién después aplicar políticas RLS, una vez confirmado que las sesiones
+     autenticadas funcionan.
+- **Blocker crítico:** la tabla `allowed_emails` (allowlist) devuelve 404.
+  Investigar esto ANTES de reactivar OAuth, o el login se puede romper entero.
+- **Nota clave:** RLS nunca borra datos, solo controla acceso. El estado actual
+  (sin RLS, anon key expuesta en el frontend) ES el riesgo real.
+- **Contexto OAuth:** dos proyectos de Google Cloud — "Horas BPs"
+  (`admin@projectreset.co`) y "bp-manager". Redirect URI de Supabase:
+  `https://wkannvjtzycyyquhnncv.supabase.co/auth/v1/callback`. Email de admin
+  vía `VITE_ADMIN_EMAIL`.
+
+## En el horizonte
+
+- Completar RLS después de que OAuth esté estable y testeado.
+- Campo `horas_reales` junto a `horas_cotizadas` en Asignaciones, con métrica de
+  "desvío de horas".
+- Riesgo de pausa del free tier de Supabase tras inactividad: mantener actividad
+  o considerar upgrade.
+
+---
+> Nota: no metas claves/secrets reales en este archivo (se commitea al repo).
+> Los valores sensibles van en `.env` / variables de entorno de Vercel.
