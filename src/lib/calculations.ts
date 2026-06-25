@@ -258,7 +258,8 @@ export function calculateProjectMargin(
     proyecto,
     honorariosMensuales ?? [],
     mes,
-    horasMensuales ?? []
+    horasMensuales ?? [],
+    totalHoras > 0 ? totalHoras : undefined // cap rate if over budget
   )
 
   // Per-BP rate via the per-month profitability model: sueldo[mes] / cap_bp.
@@ -633,6 +634,12 @@ export interface ProjectBPBreakdown {
    *  `honorarios_mes / horas_requeridas_mensual` over months with data.
    *  Same for every row in the project. */
   ratePerHourProyecto: number
+  /** Per-month project per-hour rate (length 12):
+   *  `honorarios[m] / MAX(horas_req[m], horas_asignadas_total[m])`.
+   *  Project-level — same array for every row. Use this in monthly views
+   *  so the rate reflects the selected month (capped when over budget)
+   *  instead of the yearly average. */
+  ratePerHourProyectoPorMes: number[]
   /** Effective per-hour BP rate, weighted by hours actually worked:
    *  `Σ horas[m] × (sueldo[m]/cap_bp) / Σ horas[m]`. Stays consistent
    *  with `costosAnuales`. */
@@ -704,8 +711,18 @@ export function buildBPsForProject(
     const idx = h.mes - 1
     if (idx >= 0 && idx < 12) honorariosPorMes[idx] = num(h.honorarios)
   }
+  // Total assigned hours per month across all BPs for this project
+  const horasAsigTotalPorMes = new Array(12).fill(0) as number[]
+  for (const a of own) {
+    const idx = a.mes - 1
+    if (idx >= 0 && idx < 12) horasAsigTotalPorMes[idx] += num(a.horas)
+  }
+
   const ratePerHourProyectoPorMes = honorariosPorMes.map((hon, i) => {
-    const hr = horasReqPorMes[i]
+    const hrReq = horasReqPorMes[i]
+    const hrAsig = horasAsigTotalPorMes[i]
+    // Use max of budgeted vs assigned so rate adjusts when over budget
+    const hr = Math.max(hrReq, hrAsig > 0 ? hrAsig : 0)
     return hon > 0 && hr > 0 ? hon / hr : 0
   })
   // Single "project rate" shown in the row: avg of months with booked
@@ -787,6 +804,7 @@ export function buildBPsForProject(
       percentOfProject,
       totalSueldo,
       ratePerHourProyecto,
+      ratePerHourProyectoPorMes,
       ratePerHourBpAvg,
       ratePerHourBpPorMes,
       ingresosAnuales,
@@ -1008,7 +1026,8 @@ function valorHoraProyectoForMonth(
   proyecto: Proyecto,
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
   mes: number,
-  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = []
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = [],
+  horasAsignadasTotal?: number // total hours assigned to this project this month
 ): number {
   const hRow = honorariosMensuales.find(
     (h) => h.mes === mes && same(h.proyecto_id, proyecto.id)
@@ -1017,12 +1036,18 @@ function valorHoraProyectoForMonth(
   const horasRow = horasMensuales.find(
     (h) => h.mes === mes && same(h.proyecto_id, proyecto.id)
   )
-  const horas =
+  const horasPresupuestadas =
     horasRow && num(horasRow.horas) > 0
       ? num(horasRow.horas)
       : proyecto.horas_requeridas_mensual != null
         ? num(proyecto.horas_requeridas_mensual)
         : HOURS_PER_MONTH
+  // Cap: if more hours were assigned than budgeted, the rate adjusts down
+  // so the total ingreso reference stays at the fixed honorario amount.
+  const horas =
+    horasAsignadasTotal != null && horasAsignadasTotal > horasPresupuestadas
+      ? horasAsignadasTotal
+      : horasPresupuestadas
   if (precio <= 0 || horas <= 0) return 0
   return precio / horas
 }
@@ -1212,13 +1237,22 @@ export function bpRentabilidadMonthRow(
     })
   }
 
+  // For rate capping: total hours assigned per project this month (all BPs)
+  const horasAsigPorProyecto = new Map<string, number>()
+  for (const a of asignaciones) {
+    if (a.mes !== mes) continue
+    const key = String(a.proyecto_id)
+    horasAsigPorProyecto.set(key, (horasAsigPorProyecto.get(key) ?? 0) + num(a.horas))
+  }
+
   const byProject: BPProjectRentabilidadRow[] = Array.from(byProjMap.values())
     .map(({ proyecto, horas }) => {
       const vhp = valorHoraProyectoForMonth(
         proyecto,
         honorariosMensuales,
         mes,
-        horasMensuales
+        horasMensuales,
+        horasAsigPorProyecto.get(String(proyecto.id)) // total project hours this month
       )
       const ingreso = vhp * horas
       const costo = valorHoraBP * horas

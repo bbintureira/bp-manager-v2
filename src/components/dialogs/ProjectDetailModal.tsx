@@ -441,7 +441,9 @@ function ProjectMensualView({
       horas: b.horasPorMes[i] ?? 0,
       costo: b.costosPorMes[i] ?? 0,
       ingresoRef: b.ingresosPorMes[i] ?? 0,
-      ratePerHourProyecto: b.ratePerHourProyecto,
+      // Per-month project rate (capped when over budget), NOT the yearly
+      // average — so the column reconciles with Ingreso ref. for this mes.
+      ratePerHourProyecto: b.ratePerHourProyectoPorMes[i] ?? 0,
       ratePerHourBp: b.ratePerHourBpPorMes[i] ?? 0,
     }))
     .filter((b) => b.horas > 0 || b.costo > 0)
