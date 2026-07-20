@@ -17,7 +17,12 @@ import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { TableSkeleton } from '@/components/ui/loading-states'
 import { getMonthLabel } from '@/components/ui/month-picker'
-import { TIPO_OPTIONS } from '@/components/dialogs/NewProjectDialog'
+import {
+  TIPO_OPTIONS,
+  TIPO_CLIENTE_OPTIONS,
+  TIPO_PROYECTO_OPTIONS,
+  TIPO_CONTRATO_OPTIONS,
+} from '@/components/dialogs/NewProjectDialog'
 import {
   getProjectHonorarioFullYear,
   getProjectHorasFullYear,
@@ -63,6 +68,10 @@ interface EditProjectDialogProps {
 interface BasicFormState {
   nombre: string
   tipo: string
+  /** Categorization dimensions — '' means "not specified" (saved as null). */
+  tipo_cliente: string
+  tipo_proyecto: string
+  tipo_contrato: string
   fecha_inicio: string
   status: string
 }
@@ -71,6 +80,9 @@ function basicFromProyecto(p: Proyecto | null): BasicFormState {
   return {
     nombre: p?.nombre ?? '',
     tipo: p?.tipo ?? 'Always On',
+    tipo_cliente: p?.tipo_cliente ?? '',
+    tipo_proyecto: p?.tipo_proyecto ?? '',
+    tipo_contrato: p?.tipo_contrato ?? '',
     fecha_inicio: p?.fecha_inicio ?? '',
     status: p?.status ?? 'activo',
   }
@@ -162,6 +174,9 @@ export function EditProjectDialog({
     () =>
       basic.nombre !== initialBasic.nombre ||
       basic.tipo !== initialBasic.tipo ||
+      basic.tipo_cliente !== initialBasic.tipo_cliente ||
+      basic.tipo_proyecto !== initialBasic.tipo_proyecto ||
+      basic.tipo_contrato !== initialBasic.tipo_contrato ||
       basic.fecha_inicio !== initialBasic.fecha_inicio ||
       basic.status !== initialBasic.status,
     [basic, initialBasic]
@@ -279,6 +294,10 @@ export function EditProjectDialog({
             ? {
                 nombre: basic.nombre.trim(),
                 tipo: basic.tipo.trim() || null,
+                // Empty selects save as null (nullable columns).
+                tipo_cliente: basic.tipo_cliente || null,
+                tipo_proyecto: basic.tipo_proyecto || null,
+                tipo_contrato: basic.tipo_contrato || null,
                 fecha_inicio: basic.fecha_inicio || null,
                 status: basic.status,
               }
@@ -403,6 +422,31 @@ export function EditProjectDialog({
                   ))}
                 </Select>
               </Field>
+            </div>
+
+            {/* Categorization dimensions (optional, additive to Tipo). */}
+            <div className="grid grid-cols-3 gap-3">
+              <CategorySelect
+                id="ep-tipo-cliente"
+                label="Tipo cliente"
+                value={basic.tipo_cliente}
+                options={TIPO_CLIENTE_OPTIONS}
+                onChange={(v) => setBasic({ ...basic, tipo_cliente: v })}
+              />
+              <CategorySelect
+                id="ep-tipo-proyecto"
+                label="Tipo proyecto"
+                value={basic.tipo_proyecto}
+                options={TIPO_PROYECTO_OPTIONS}
+                onChange={(v) => setBasic({ ...basic, tipo_proyecto: v })}
+              />
+              <CategorySelect
+                id="ep-tipo-contrato"
+                label="Tipo contrato"
+                value={basic.tipo_contrato}
+                options={TIPO_CONTRATO_OPTIONS}
+                onChange={(v) => setBasic({ ...basic, tipo_contrato: v })}
+              />
             </div>
 
             {valorHora !== null && valorHora > 0 && (
@@ -647,6 +691,42 @@ export function EditProjectDialog({
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** Optional categorization select with a "Sin especificar" empty value and
+ *  a fallback option so an unexpected stored value (outside the known list)
+ *  is preserved instead of silently reset. */
+function CategorySelect({
+  id,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: string
+  options: readonly string[]
+  onChange: (value: string) => void
+}) {
+  const isKnown = value === '' || (options as readonly string[]).includes(value)
+  return (
+    <Field id={id} label={label}>
+      <Select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Sin especificar</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+        {!isKnown && (
+          <option key={value} value={value}>
+            {value} (actual)
+          </option>
+        )}
+      </Select>
+    </Field>
   )
 }
 

@@ -11,6 +11,8 @@ export const TOOLTIPS = {
   // Dashboard BPs — Horas tab (tabla)
   horasLibresColumna:
     'Horas contratadas menos horas asignadas. Capacidad disponible del BP que no está siendo aprovechada este mes.',
+  costoHorasLibresColumna:
+    'Valor en pesos de las horas libres: horas libres × (sueldo ÷ horas contratadas). Es la ociosidad, lo que la agencia paga por capacidad sin proyecto asignado. Accionable: vender esas horas.',
   ocupacionColumna:
     'Horas asignadas ÷ horas contratadas × 100. Verde: ≥85%. Naranja: 60–84%. Rojo: <60%.',
 
@@ -27,6 +29,8 @@ export const TOOLTIPS = {
     'Lo que el BP generó según la tarifa de cada proyecto asignado. Se calcula como: horas asignadas × (honorario del proyecto ÷ horas requeridas del proyecto).',
   margenColumna:
     'Ingreso cotizado menos costo real del BP. El costo real es lo que efectivamente costaron las horas asignadas, no el sueldo completo. Positivo significa que el proyecto cubre el costo de esas horas.',
+  diferenciaComercialColumna:
+    'Diferencia por cálculo comercial: horas cotizadas menos horas asignadas, valorizada al precio del proyecto. Positivo (verde) = se cotizó de más, la agencia ahorra. Negativo (rojo) = se subcotizó, la agencia pierde. Es error de estimación, no ociosidad.',
   coberturaSalarialColumna:
     'Ingreso cotizado menos sueldo. Indica cuánto del sueldo fue cubierto por los proyectos asignados.',
   costoReal:

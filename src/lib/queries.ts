@@ -32,6 +32,16 @@ export interface Proyecto {
   fecha_renovacion: string | null
   status: string | null
   description: string | null
+  /** Categorization dimensions (Victoria 2026-07). Additive to `tipo`,
+   *  which stays as-is. All nullable — legacy projects are backfilled by
+   *  hand. Allowed values live in the dialog option constants.
+   *   - tipo_cliente : 'Nuevo cliente' | 'Upselling'
+   *   - tipo_proyecto: 'Brand Boost' | 'Brand Building' | 'Brand Growth'
+   *                    | 'Brand Reset' | 'Producciones'
+   *   - tipo_contrato: 'Fee mensual' | 'Fee total' */
+  tipo_cliente: string | null
+  tipo_proyecto: string | null
+  tipo_contrato: string | null
 }
 
 export interface BrandPartner {
@@ -623,6 +633,10 @@ export interface NewProyectoData {
   fecha_inicio: string | null
   status: string
   description?: string | null
+  /** Categorization dimensions (see Proyecto). Null = not specified. */
+  tipo_cliente?: string | null
+  tipo_proyecto?: string | null
+  tipo_contrato?: string | null
   /** Optional length-12 array of per-month honorarios. When provided, seeds
    * `proyecto_honorarios_mensuales` with these specific values instead of
    * 12 copies of `honorarios_cotizador`. */
@@ -835,6 +849,10 @@ export interface UpdateProyectoData {
   fecha_renovacion?: string | null
   status?: string
   description?: string | null
+  /** Categorization dimensions (see Proyecto). Null = not specified. */
+  tipo_cliente?: string | null
+  tipo_proyecto?: string | null
+  tipo_contrato?: string | null
 }
 
 export interface UpdateBrandPartnerData {

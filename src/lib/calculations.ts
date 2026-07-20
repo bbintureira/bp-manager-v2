@@ -228,6 +228,21 @@ export interface ProjectMonthSummary {
   marginAbsolute: number
   /** (revenue - cost) / revenue × 100. 0 when revenue ≤ 0. */
   marginPercent: number
+  /**
+   * HC — quoted/budgeted hours for this project in `mes` (from
+   * `horas_proyecto`, fallback scalar `horas_requeridas_mensual`, then 160).
+   * Independent of hours actually assigned (HA = `totalHoras`).
+   */
+  horasCotizadas: number
+  /**
+   * "Diferencia por cálculo comercial" in hours: HC - HA. Positive means
+   * the project was over-quoted (we save); negative means under-quoted (we
+   * lose). Pure estimation error — NOT idle capacity.
+   */
+  diffHorasComercial: number
+  /** The same difference valued at the project's per-hour rate:
+   *  (HC - HA) × projectRate. Same currency as `revenue`. */
+  diffPlataComercial: number
 }
 
 /**
@@ -304,6 +319,17 @@ export function calculateProjectMargin(
   const marginPercent =
     revenue > 0 ? (marginAbsolute / revenue) * 100 : 0
 
+  // "Diferencia por cálculo comercial": quoted hours (HC) vs assigned
+  // hours (HA = totalHoras), valued at the project's per-hour rate. Kept
+  // separate from idle-capacity math — this measures estimation error.
+  const horasCotizadas = horasCotizadasProyectoForMonth(
+    proyecto,
+    horasMensuales ?? [],
+    mes
+  )
+  const diffHorasComercial = horasCotizadas - totalHoras
+  const diffPlataComercial = diffHorasComercial * projectRate
+
   return {
     proyecto,
     bps,
@@ -315,6 +341,9 @@ export function calculateProjectMargin(
     cost,
     marginAbsolute,
     marginPercent,
+    horasCotizadas,
+    diffHorasComercial,
+    diffPlataComercial,
   }
 }
 
@@ -505,6 +534,13 @@ export interface ProjectAnnualSummary {
   marginAbsolute: number
   /** (revenue - cost) / revenue × 100. 0 if revenue ≤ 0. */
   marginPercent: number
+  /** Σ HC across active months (those with hours assigned). */
+  horasCotizadas: number
+  /** Σ (HC - HA) across active months. Same sign convention as monthly. */
+  diffHorasComercial: number
+  /** Σ (HC_m - HA_m) × rate_m across active months — respects the
+   *  monthly variation of both rate and quoted hours. */
+  diffPlataComercial: number
   /** Per-month breakdown, indexed 0..11 (mes = i+1). */
   byMonth: ProjectMonthSummary[]
 }
@@ -537,6 +573,17 @@ export function summarizeProjectsAnnual(
     const revenue = months.reduce((s, x) => s + x.revenue, 0)
     const cost = months.reduce((s, x) => s + x.cost, 0)
     const totalHoras = months.reduce((s, x) => s + x.totalHoras, 0)
+    // Commercial difference (HC - HA) aggregated only over active months,
+    // valued month-by-month so rate + quoted-hours variation is respected.
+    const horasCotizadas = months.reduce((s, x) => s + x.horasCotizadas, 0)
+    const diffHorasComercial = months.reduce(
+      (s, x) => s + x.diffHorasComercial,
+      0
+    )
+    const diffPlataComercial = months.reduce(
+      (s, x) => s + x.diffPlataComercial,
+      0
+    )
     const avgUtilization =
       months.length === 0
         ? 0
@@ -556,6 +603,9 @@ export function summarizeProjectsAnnual(
       avgUtilization,
       marginAbsolute,
       marginPercent,
+      horasCotizadas,
+      diffHorasComercial,
+      diffPlataComercial,
       byMonth,
     }
   })
@@ -1052,6 +1102,28 @@ function valorHoraProyectoForMonth(
   return precio / horas
 }
 
+/** Quoted/budgeted hours (HC) for a project in `mes`.
+ *
+ * Prefers the per-month row from `horas_proyecto` (via `horasMensuales`),
+ * falls back to the scalar `proyecto.horas_requeridas_mensual`, then to 160
+ * — but ONLY when the scalar is null. Unlike `valorHoraProyectoForMonth`
+ * this never caps by assigned hours: HC must stay independent of HA so the
+ * commercial difference (HC - HA) can be negative when over-assigned. */
+function horasCotizadasProyectoForMonth(
+  proyecto: Proyecto,
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[],
+  mes: number
+): number {
+  const row = horasMensuales.find(
+    (h) => h.mes === mes && same(h.proyecto_id, proyecto.id)
+  )
+  if (row && num(row.horas) > 0) return num(row.horas)
+  if (proyecto.horas_requeridas_mensual != null) {
+    return num(proyecto.horas_requeridas_mensual)
+  }
+  return HOURS_PER_MONTH
+}
+
 export interface BPProjectHorasRow {
   proyecto_id: Id
   proyecto_name: string
@@ -1066,6 +1138,9 @@ export interface BPHorasMonthRow {
   horasAsignadas: number
   /** contratadas - asignadas (>=0; negative becomes 0 because over means we're "over" not "free"). */
   horasLibres: number
+  /** Idle cost in pesos: horasLibres × (sueldo[mes] / capacidad). What the
+   *  agency pays for unassigned capacity this month. */
+  costoHorasLibres: number
   /** asignadas / contratadas × 100 (0 if no capacity). */
   ocupacion: number
   /** Per-project breakdown. */
@@ -1089,6 +1164,7 @@ export function bpHorasMonthRow(
       horasContratadas: 0,
       horasAsignadas: 0,
       horasLibres: 0,
+      costoHorasLibres: 0,
       ocupacion: 0,
       byProject: [],
     }
@@ -1104,6 +1180,8 @@ export function bpHorasMonthRow(
   )
   const horasAsignadas = own.reduce((s, a) => s + num(a.horas), 0)
   const horasLibres = Math.max(0, horasContratadas - horasAsignadas)
+  // Value the idle hours at the BP's hourly cost (sueldo[mes] / capacidad).
+  const costoHorasLibres = horasLibres * valorHoraBPForMonth(bp, sueldos, mes)
   const ocupacion =
     horasContratadas > 0 ? (horasAsignadas / horasContratadas) * 100 : 0
 
@@ -1132,6 +1210,7 @@ export function bpHorasMonthRow(
     horasContratadas,
     horasAsignadas,
     horasLibres,
+    costoHorasLibres,
     ocupacion,
     byProject,
   }
@@ -1188,6 +1267,13 @@ export interface BPRentabilidadMonthRow {
    *   negative → projects didn't cover the salary (we're subsidising)
    *   positive → projects recovered more than the salary (good). */
   coberturaSalarial: number
+  /** "Diferencia por cálculo comercial" attributable to this BP, in hours:
+   *  Σ_proyecto (HC_bp - HA_bp), where HC_bp prorates the project's quoted
+   *  hours by the BP's share of the project's assigned hours that month. */
+  diferenciaComercialHoras: number
+  /** The same difference valued at each project's per-hour rate:
+   *  Σ_proyecto (HC_bp - HA_bp) × rate_proyecto[mes]. */
+  diferenciaComercial: number
   /** Per-project breakdown. */
   byProject: BPProjectRentabilidadRow[]
 }
@@ -1211,6 +1297,8 @@ export function bpRentabilidadMonthRow(
       margen: 0,
       margenPercent: 0,
       coberturaSalarial: 0,
+      diferenciaComercialHoras: 0,
+      diferenciaComercial: 0,
       byProject: [],
     }
   }
@@ -1269,6 +1357,32 @@ export function bpRentabilidadMonthRow(
     })
     .sort((a, b) => b.margen - a.margen)
 
+  // Commercial difference (HC - HA) attributed to this BP. The project's
+  // quoted hours (HC_proyecto) are prorated by the BP's share of the
+  // project's total assigned hours that month, then valued at the project
+  // rate. Estimation error, kept apart from idle-capacity math.
+  let diferenciaComercialHoras = 0
+  let diferenciaComercial = 0
+  for (const { proyecto, horas } of byProjMap.values()) {
+    const haProyectoTotal = horasAsigPorProyecto.get(String(proyecto.id)) ?? 0
+    const hcProyecto = horasCotizadasProyectoForMonth(
+      proyecto,
+      horasMensuales,
+      mes
+    )
+    const hcBp = haProyectoTotal > 0 ? hcProyecto * (horas / haProyectoTotal) : 0
+    const diffHoras = hcBp - horas
+    const vhp = valorHoraProyectoForMonth(
+      proyecto,
+      honorariosMensuales,
+      mes,
+      horasMensuales,
+      haProyectoTotal
+    )
+    diferenciaComercialHoras += diffHoras
+    diferenciaComercial += diffHoras * vhp
+  }
+
   const ingresoCotizado = byProject.reduce((s, x) => s + x.ingreso, 0)
   const costo = byProject.reduce((s, x) => s + x.costo, 0)
   const margen = ingresoCotizado - costo
@@ -1288,6 +1402,8 @@ export function bpRentabilidadMonthRow(
     margen,
     margenPercent,
     coberturaSalarial,
+    diferenciaComercialHoras,
+    diferenciaComercial,
     byProject,
   }
 }
@@ -1334,6 +1450,10 @@ export interface BPHorasAnnualAggregate {
   totalAsignadas: number
   /** contratadas - asignadas (≥0). */
   totalLibres: number
+  /** Σ (horasLibres_m × valorHora_m) over active months — the idle cost in
+   *  pesos, summed month-by-month so monthly sueldo variation is respected
+   *  (NOT totalLibres × an average rate). */
+  costoHorasLibres: number
   /** weighted: totalAsignadas / totalContratadas × 100. */
   ocupacionPromedio: number
   /** Per-month horas asignadas, indexed 0..11. */
@@ -1371,7 +1491,20 @@ export function bpHorasAnnualAggregate(
     (s, m) => s + m.horasAsignadas,
     0
   )
-  const totalLibres = Math.max(0, totalContratadas - totalAsignadas)
+  // Idle hours + idle cost, both summed month-by-month over active months.
+  // Idle does NOT net across months: a BP over-assigned in one month and
+  // idle in another still has real, sellable idle hours — so we sum
+  // `max(0, contratadas_m − asignadas_m)` per month rather than the annual
+  // net. This keeps `totalLibres` consistent with `costoHorasLibres` and
+  // with the monthly view. (Intentionally changes the number for
+  // over-assigned BPs vs the old net calculation.)
+  let totalLibres = 0
+  let costoHorasLibres = 0
+  for (const m of monthsWithAsig) {
+    const row = year.byMonth[m - 1]
+    totalLibres += row?.horasLibres ?? 0
+    costoHorasLibres += row?.costoHorasLibres ?? 0
+  }
   const ocupacionPromedio =
     totalContratadas > 0 ? (totalAsignadas / totalContratadas) * 100 : 0
   return {
@@ -1379,6 +1512,7 @@ export function bpHorasAnnualAggregate(
     totalContratadas,
     totalAsignadas,
     totalLibres,
+    costoHorasLibres,
     ocupacionPromedio,
     byMonth: year.byMonth.map((m) => m.horasAsignadas),
   }
@@ -1402,6 +1536,10 @@ export interface BPRentabilidadAnnualAggregate {
   totalSueldo: number
   /** totalIngreso − totalSueldo. */
   totalCoberturaSalarial: number
+  /** Σ diferenciaComercialHoras across the 12 months. */
+  totalDiferenciaComercialHoras: number
+  /** Σ diferenciaComercial (en plata) across the 12 months. */
+  totalDiferenciaComercial: number
   /** Per-month margen, indexed 0..11. */
   byMonth: number[]
 }
@@ -1453,6 +1591,16 @@ export function bpRentabilidadAnnualAggregate(
   // ingreso − sueldo: how much of the salary was covered by the cotized
   // revenue this BP generated across the year.
   const totalCoberturaSalarial = totalIngreso - totalSueldo
+  // Commercial difference summed month-by-month (each month already 0 when
+  // the BP has no projects / is out of window), so no extra filtering needed.
+  const totalDiferenciaComercialHoras = year.byMonth.reduce(
+    (s, m) => s + m.diferenciaComercialHoras,
+    0
+  )
+  const totalDiferenciaComercial = year.byMonth.reduce(
+    (s, m) => s + m.diferenciaComercial,
+    0
+  )
   return {
     bp,
     totalIngreso,
@@ -1462,6 +1610,8 @@ export function bpRentabilidadAnnualAggregate(
     sueldoPromedio,
     totalSueldo,
     totalCoberturaSalarial,
+    totalDiferenciaComercialHoras,
+    totalDiferenciaComercial,
     byMonth: year.byMonth.map((m) => m.margen),
   }
 }

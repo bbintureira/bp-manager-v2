@@ -31,6 +31,21 @@ export const TIPO_OPTIONS = [
   'Upselling',
 ] as const
 
+// Categorization dimensions (Victoria 2026-07). Additive to `tipo`; all
+// optional. Kept here so the dashboard filters and both dialogs share one
+// source of truth for the allowed values.
+export const TIPO_CLIENTE_OPTIONS = ['Nuevo cliente', 'Upselling'] as const
+
+export const TIPO_PROYECTO_OPTIONS = [
+  'Brand Boost',
+  'Brand Building',
+  'Brand Growth',
+  'Brand Reset',
+  'Producciones',
+] as const
+
+export const TIPO_CONTRATO_OPTIONS = ['Fee mensual', 'Fee total'] as const
+
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
 
 interface NewProjectDialogProps {
@@ -43,6 +58,10 @@ interface NewProjectDialogProps {
 interface FormState {
   nombre: string
   tipo: string
+  /** Categorization dimensions — '' means "not specified" (saved as null). */
+  tipo_cliente: string
+  tipo_proyecto: string
+  tipo_contrato: string
   horas_requeridas: string
   fecha_inicio: string
   status: string
@@ -55,6 +74,9 @@ interface FormState {
 const initial: FormState = {
   nombre: '',
   tipo: 'Always On',
+  tipo_cliente: '',
+  tipo_proyecto: '',
+  tipo_contrato: '',
   horas_requeridas: '160',
   fecha_inicio: '',
   status: 'activo',
@@ -124,6 +146,11 @@ export function NewProjectDialog({
     const result = await createProyecto({
       nombre: form.nombre.trim(),
       tipo: form.tipo.trim() || null,
+      // Empty selects save as null — the columns are nullable and get
+      // backfilled by hand for legacy projects.
+      tipo_cliente: form.tipo_cliente || null,
+      tipo_proyecto: form.tipo_proyecto || null,
+      tipo_contrato: form.tipo_contrato || null,
       honorarios_cotizador: promedioMensual,
       precio_mensual: promedioMensual,
       horas_requeridas_mensual: horasReqNum,
@@ -190,6 +217,60 @@ export function NewProjectDialog({
                   {STATUS_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>
                       {o.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+
+            {/* Categorization dimensions (optional, additive to Tipo). */}
+            <div className="grid grid-cols-3 gap-3">
+              <Field id="np-tipo-cliente" label="Tipo cliente">
+                <Select
+                  id="np-tipo-cliente"
+                  value={form.tipo_cliente}
+                  onChange={(e) =>
+                    setForm({ ...form, tipo_cliente: e.target.value })
+                  }
+                >
+                  <option value="">Sin especificar</option>
+                  {TIPO_CLIENTE_OPTIONS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field id="np-tipo-proyecto" label="Tipo proyecto">
+                <Select
+                  id="np-tipo-proyecto"
+                  value={form.tipo_proyecto}
+                  onChange={(e) =>
+                    setForm({ ...form, tipo_proyecto: e.target.value })
+                  }
+                >
+                  <option value="">Sin especificar</option>
+                  {TIPO_PROYECTO_OPTIONS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field id="np-tipo-contrato" label="Tipo contrato">
+                <Select
+                  id="np-tipo-contrato"
+                  value={form.tipo_contrato}
+                  onChange={(e) =>
+                    setForm({ ...form, tipo_contrato: e.target.value })
+                  }
+                >
+                  <option value="">Sin especificar</option>
+                  {TIPO_CONTRATO_OPTIONS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
                     </option>
                   ))}
                 </Select>

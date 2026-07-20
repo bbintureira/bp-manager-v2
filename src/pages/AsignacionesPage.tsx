@@ -1363,8 +1363,14 @@ function MonthlyEditGrid({
                         value={values[i] ?? 0}
                         onChange={(e) => onCell(id, i, e.target.value)}
                         onFocus={(e) => e.currentTarget.select()}
+                        // Full-cell width so the right-aligned number sits
+                        // directly under its month header. Cell px-1 (4px) +
+                        // input px-1 (4px) = 8px right padding, matching the
+                        // compact <Th> (px-2). Fixed 80px used to leave the
+                        // number left-anchored while the header stretched
+                        // right — that was the misalignment.
                         className={cn(
-                          'w-[80px] h-11 px-2 rounded-sm border border-transparent bg-transparent',
+                          'w-full min-w-[64px] h-11 px-1 rounded-sm border border-transparent bg-transparent',
                           'text-lg text-primary text-right font-mono tabular-nums',
                           'hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:border-accent'
                         )}

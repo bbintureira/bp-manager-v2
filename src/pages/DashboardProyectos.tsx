@@ -17,7 +17,9 @@ import { PageHeader } from '@/components/layout/page-header'
 import { ConfirmDialog } from '@/components/dialogs/ConfirmDialog'
 import {
   NewProjectDialog,
-  TIPO_OPTIONS,
+  TIPO_CLIENTE_OPTIONS,
+  TIPO_PROYECTO_OPTIONS,
+  TIPO_CONTRATO_OPTIONS,
 } from '@/components/dialogs/NewProjectDialog'
 import { EditProjectDialog } from '@/components/dialogs/EditProjectDialog'
 import { ProjectDetailModal } from '@/components/dialogs/ProjectDetailModal'
@@ -198,11 +200,18 @@ export function DashboardProyectos() {
   const [detailingProyecto, setDetailingProyecto] = useState<Proyecto | null>(null)
   const [honorariosProyecto, setHonorariosProyecto] = useState<Proyecto | null>(null)
   const [deletingProyecto, setDeletingProyecto] = useState<Proyecto | null>(null)
-  // Multi-select: empty array = none selected (matches nothing); array of
-  // length === TIPO_OPTIONS.length = all selected (matches everything).
-  // Initialized to "all selected" so the default view shows every project.
-  const [tipoFilter, setTipoFilter] = useState<string[]>(() => [
-    ...TIPO_OPTIONS,
+  // Categorization filters. Empty array = none selected (matches nothing);
+  // full array = all selected (matches everything). The project-type
+  // filtering is now driven by `tipoProyectoFilter` (the new project types),
+  // replacing the legacy `tipo` filter. Initialized to all selected.
+  const [tipoClienteFilter, setTipoClienteFilter] = useState<string[]>(() => [
+    ...TIPO_CLIENTE_OPTIONS,
+  ])
+  const [tipoProyectoFilter, setTipoProyectoFilter] = useState<string[]>(() => [
+    ...TIPO_PROYECTO_OPTIONS,
+  ])
+  const [tipoContratoFilter, setTipoContratoFilter] = useState<string[]>(() => [
+    ...TIPO_CONTRATO_OPTIONS,
   ])
 
   const { query: searchQuery } = useSearch()
@@ -270,19 +279,45 @@ export function DashboardProyectos() {
   )
 
   // Filter helpers shared across monthly + annual views.
-  const allTiposSelected = tipoFilter.length === TIPO_OPTIONS.length
+  const allClienteSelected =
+    tipoClienteFilter.length === TIPO_CLIENTE_OPTIONS.length
+  const allProyectoSelected =
+    tipoProyectoFilter.length === TIPO_PROYECTO_OPTIONS.length
+  const allContratoSelected =
+    tipoContratoFilter.length === TIPO_CONTRATO_OPTIONS.length
+  // Any categorization filter narrowed from "all" — used to tune the empty
+  // state copy so a no-match reads as a filter, not "no data".
+  const anyCategoriaFiltered =
+    !allClienteSelected || !allProyectoSelected || !allContratoSelected
   const passesFilters = useCallback(
     (p: Proyecto) => {
-      if (!allTiposSelected) {
-        // When the user has unchecked some tipos, only show projects whose
-        // tipo is in the selected set. Projects without a tipo never pass
-        // a partial filter (you can't filter by "nothing").
-        if (!p.tipo || !tipoFilter.includes(p.tipo)) return false
+      // Categorization dimensions: a partial filter excludes projects with a
+      // null / unlisted value in that dimension (you can't filter by
+      // "nothing"). Project-type filtering lives in `tipoProyectoFilter`.
+      if (!allClienteSelected) {
+        if (!p.tipo_cliente || !tipoClienteFilter.includes(p.tipo_cliente))
+          return false
+      }
+      if (!allProyectoSelected) {
+        if (!p.tipo_proyecto || !tipoProyectoFilter.includes(p.tipo_proyecto))
+          return false
+      }
+      if (!allContratoSelected) {
+        if (!p.tipo_contrato || !tipoContratoFilter.includes(p.tipo_contrato))
+          return false
       }
       if (!matchesQuery(p.nombre, searchQuery)) return false
       return true
     },
-    [tipoFilter, allTiposSelected, searchQuery]
+    [
+      tipoClienteFilter,
+      allClienteSelected,
+      tipoProyectoFilter,
+      allProyectoSelected,
+      tipoContratoFilter,
+      allContratoSelected,
+      searchQuery,
+    ]
   )
 
   // Monthly view only surfaces projects that have actual data for this
@@ -336,19 +371,40 @@ export function DashboardProyectos() {
   }, [annualActive])
 
   const topbarActions = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center flex-wrap gap-2">
       <ViewToggle value={viewMode} onChange={setViewMode} />
       {viewMode === 'monthly' && (
         <MonthPicker value={mes} onChange={setMes} />
       )}
+      {/* Project-type filter — now driven by the new project types
+          (Brand Boost / Building / Growth / Reset / Producciones), replacing
+          the legacy `tipo` filter. */}
       <MultiSelect
-        ariaLabel="Filtrar por tipo"
-        value={tipoFilter}
-        onChange={setTipoFilter}
-        options={TIPO_OPTIONS.map((t) => ({ value: t, label: t }))}
+        ariaLabel="Filtrar por tipo de proyecto"
+        value={tipoProyectoFilter}
+        onChange={setTipoProyectoFilter}
+        options={TIPO_PROYECTO_OPTIONS.map((t) => ({ value: t, label: t }))}
         allLabel="Todos los tipos"
         allOptionLabel="Todas"
-        placeholder="Sin tipos"
+        placeholder="Sin tipo"
+      />
+      <MultiSelect
+        ariaLabel="Filtrar por tipo cliente"
+        value={tipoClienteFilter}
+        onChange={setTipoClienteFilter}
+        options={TIPO_CLIENTE_OPTIONS.map((t) => ({ value: t, label: t }))}
+        allLabel="Todo cliente"
+        allOptionLabel="Todas"
+        placeholder="Sin cliente"
+      />
+      <MultiSelect
+        ariaLabel="Filtrar por tipo contrato"
+        value={tipoContratoFilter}
+        onChange={setTipoContratoFilter}
+        options={TIPO_CONTRATO_OPTIONS.map((t) => ({ value: t, label: t }))}
+        allLabel="Todo contrato"
+        allOptionLabel="Todas"
+        placeholder="Sin contrato"
       />
     </div>
   )
@@ -669,7 +725,7 @@ export function DashboardProyectos() {
           monthlyActive.length === 0 ? (
             <EmptyState
               message={
-                searchQuery || !allTiposSelected
+                searchQuery || anyCategoriaFiltered
                   ? 'Ningún proyecto coincide con los filtros.'
                   : 'No hay datos para este mes.'
               }
@@ -688,7 +744,7 @@ export function DashboardProyectos() {
         ) : annualActive.length === 0 ? (
           <EmptyState
             message={
-              searchQuery || !allTiposSelected
+              searchQuery || anyCategoriaFiltered
                 ? 'Ningún proyecto coincide con los filtros.'
                 : 'Sin asignaciones cargadas.'
             }
@@ -779,6 +835,10 @@ interface ProjectRowLike {
   revenue: number
   cost: number
   marginAbsolute: number
+  /** HC − HA in hours (commercial difference / estimation error). */
+  diffHorasComercial: number
+  /** The same difference valued at the project rate. */
+  diffPlataComercial: number
 }
 
 function projectTableColumns<T extends ProjectRowLike>(
@@ -798,13 +858,19 @@ function projectTableColumns<T extends ProjectRowLike>(
       ),
     },
     {
-      key: 'tipo',
-      header: 'Tipo',
-      render: (_v, row) => (
-        <span className="text-secondary whitespace-nowrap">
-          {row.proyecto.tipo ?? '—'}
-        </span>
-      ),
+      key: 'tipoCliente',
+      header: 'Cliente',
+      render: (_v, row) => <CategoriaCell value={row.proyecto.tipo_cliente} />,
+    },
+    {
+      key: 'tipoProyecto',
+      header: 'Proyecto (cat.)',
+      render: (_v, row) => <CategoriaCell value={row.proyecto.tipo_proyecto} />,
+    },
+    {
+      key: 'tipoContrato',
+      header: 'Contrato',
+      render: (_v, row) => <CategoriaCell value={row.proyecto.tipo_contrato} />,
     },
     {
       key: 'estado',
@@ -829,6 +895,17 @@ function projectTableColumns<T extends ProjectRowLike>(
       render: (_v, row) => formatCurrency(row.cost, 0),
     },
     {
+      key: 'difComercial',
+      header: withInfo('Dif. comercial', TOOLTIPS.diferenciaComercialColumna),
+      numeric: true,
+      render: (_v, row) => (
+        <ComercialDiffCell
+          horas={row.diffHorasComercial}
+          plata={row.diffPlataComercial}
+        />
+      ),
+    },
+    {
       key: 'resultado',
       header: withInfo('Resultado', TOOLTIPS.resultadoColumna),
       numeric: true,
@@ -848,6 +925,42 @@ function projectTableColumns<T extends ProjectRowLike>(
       ),
     },
   ]
+}
+
+/** Commercial difference (HC − HA): plata in green/red with the hours diff
+ *  as a secondary line. Positive = over-quoted (agency saves), negative =
+ *  under-quoted (agency loses). Independent of idle-capacity math. */
+function ComercialDiffCell({ horas, plata }: { horas: number; plata: number }) {
+  const rHoras = Math.round(horas)
+  if (Math.round(plata) === 0 && rHoras === 0) {
+    return <span className="text-tertiary">—</span>
+  }
+  const color =
+    plata > 0
+      ? 'var(--success)'
+      : plata < 0
+        ? 'var(--danger)'
+        : 'var(--text-secondary)'
+  const sign = plata > 0 ? '+' : plata < 0 ? '−' : ''
+  const hSign = rHoras > 0 ? '+' : rHoras < 0 ? '−' : ''
+  return (
+    <span className="inline-flex flex-col items-end leading-tight">
+      <span style={{ color }} className="font-mono font-medium tabular-nums">
+        {sign}
+        {formatCurrency(Math.abs(plata), 0)}
+      </span>
+      <span className="text-2xs text-tertiary font-mono tabular-nums">
+        {hSign}
+        {formatHours(Math.abs(rHoras))}
+      </span>
+    </span>
+  )
+}
+
+/** Categorization dimension value, or a muted dash when not specified. */
+function CategoriaCell({ value }: { value: string | null }) {
+  if (!value) return <span className="text-tertiary">—</span>
+  return <span className="text-secondary whitespace-nowrap">{value}</span>
 }
 
 /** Green / red signed currency for Resultado = Ingresos − Costo. */

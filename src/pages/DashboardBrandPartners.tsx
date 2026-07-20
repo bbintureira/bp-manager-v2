@@ -802,6 +802,31 @@ function OccupationCell({ pct }: { pct: number }) {
   )
 }
 
+/** Commercial difference (HC − HA): plata in green/red with the hours diff
+ *  as a secondary line. Positive = over-quoted (agency saves). */
+function ComercialDiffCell({ horas, plata }: { horas: number; plata: number }) {
+  const rHoras = Math.round(horas)
+  if (Math.round(plata) === 0 && rHoras === 0) {
+    return <span className="text-tertiary">—</span>
+  }
+  const tone =
+    plata > 0 ? 'text-success' : plata < 0 ? 'text-danger' : 'text-tertiary'
+  const sign = plata > 0 ? '+' : plata < 0 ? '−' : ''
+  const hSign = rHoras > 0 ? '+' : rHoras < 0 ? '−' : ''
+  return (
+    <span className="inline-flex flex-col items-end leading-tight">
+      <span className={cn('font-mono tabular-nums font-medium', tone)}>
+        {sign}
+        {formatCurrency(Math.abs(plata))}
+      </span>
+      <span className="text-2xs text-tertiary font-mono tabular-nums">
+        {hSign}
+        {formatHours(Math.abs(rHoras))}
+      </span>
+    </span>
+  )
+}
+
 /** Tints margen red/green. */
 function MargenCell({ value, percent }: { value: number; percent?: number }) {
   const tone = value < 0 ? 'text-danger' : value > 0 ? 'text-success' : 'text-tertiary'
@@ -820,10 +845,6 @@ function MargenCell({ value, percent }: { value: number; percent?: number }) {
 // --------------------------------------------------------------------------
 // Columns
 // --------------------------------------------------------------------------
-
-function grouperLabel(bp: BrandPartner): string {
-  return bp.grouper ?? '—'
-}
 
 function horasColumns(
   onEdit: (bp: BrandPartner) => void,
@@ -848,13 +869,6 @@ function horasColumns(
       render: (_v, row) => displaySeniority(row.bp) ?? '—',
     },
     {
-      key: 'grouper',
-      header: 'Grouper',
-      render: (_v, row) => (
-        <span className="text-secondary">{grouperLabel(row.bp)}</span>
-      ),
-    },
-    {
       key: 'horasContratadas',
       header: 'Contratadas',
       numeric: true,
@@ -871,6 +885,19 @@ function horasColumns(
       header: withInfo('Libres', TOOLTIPS.horasLibresColumna),
       numeric: true,
       render: (_v, row) => formatHours(Math.round(row.horasLibres)),
+    },
+    {
+      key: 'costoHorasLibres',
+      header: withInfo('Costo libres', TOOLTIPS.costoHorasLibresColumna),
+      numeric: true,
+      render: (_v, row) =>
+        row.costoHorasLibres > 0 ? (
+          <span className="text-warning">
+            {formatCurrency(row.costoHorasLibres)}
+          </span>
+        ) : (
+          <span className="text-tertiary">—</span>
+        ),
     },
     {
       key: 'ocupacion',
@@ -909,13 +936,6 @@ function rentabilidadColumns(
       ),
     },
     {
-      key: 'grouper',
-      header: 'Grouper',
-      render: (_v, row) => (
-        <span className="text-secondary">{grouperLabel(row.bp)}</span>
-      ),
-    },
-    {
       key: 'sueldoMensual',
       header: 'Sueldo',
       numeric: true,
@@ -936,6 +956,20 @@ function rentabilidadColumns(
       render: (_v, row) =>
         row.ingresoCotizado > 0 ? (
           <MargenCell value={row.margen} percent={row.margenPercent} />
+        ) : (
+          <span className="text-tertiary">—</span>
+        ),
+    },
+    {
+      key: 'diferenciaComercial',
+      header: withInfo('Dif. comercial', TOOLTIPS.diferenciaComercialColumna),
+      numeric: true,
+      render: (_v, row) =>
+        row.byProject.length > 0 ? (
+          <ComercialDiffCell
+            horas={row.diferenciaComercialHoras}
+            plata={row.diferenciaComercial}
+          />
         ) : (
           <span className="text-tertiary">—</span>
         ),
@@ -999,13 +1033,6 @@ function horasAnnualColumns(
       ),
     },
     {
-      key: 'grouper',
-      header: 'Grouper',
-      render: (_v, row) => (
-        <span className="text-secondary">{grouperLabel(row.bp)}</span>
-      ),
-    },
-    {
       key: 'totalContratadas',
       header: 'Contratadas año',
       numeric: true,
@@ -1022,6 +1049,19 @@ function horasAnnualColumns(
       header: 'Libres año',
       numeric: true,
       render: (_v, row) => formatHours(Math.round(row.totalLibres)),
+    },
+    {
+      key: 'costoHorasLibres',
+      header: withInfo('Costo libres', TOOLTIPS.costoHorasLibresColumna),
+      numeric: true,
+      render: (_v, row) =>
+        row.costoHorasLibres > 0 ? (
+          <span className="text-warning">
+            {formatCurrency(row.costoHorasLibres)}
+          </span>
+        ) : (
+          <span className="text-tertiary">—</span>
+        ),
     },
     {
       key: 'ocupacionPromedio',
@@ -1079,13 +1119,6 @@ function rentabilidadAnnualColumns(
       ),
     },
     {
-      key: 'grouper',
-      header: 'Grouper',
-      render: (_v, row) => (
-        <span className="text-secondary">{grouperLabel(row.bp)}</span>
-      ),
-    },
-    {
       key: 'sueldoPromedio',
       header: 'Sueldo prom.',
       numeric: true,
@@ -1106,6 +1139,20 @@ function rentabilidadAnnualColumns(
       render: (_v, row) =>
         row.totalIngreso > 0 ? (
           <MargenCell value={row.totalMargen} percent={row.margenPercent} />
+        ) : (
+          <span className="text-tertiary">—</span>
+        ),
+    },
+    {
+      key: 'diferenciaComercial',
+      header: withInfo('Dif. comercial', TOOLTIPS.diferenciaComercialColumna),
+      numeric: true,
+      render: (_v, row) =>
+        row.totalIngreso > 0 ? (
+          <ComercialDiffCell
+            horas={row.totalDiferenciaComercialHoras}
+            plata={row.totalDiferenciaComercial}
+          />
         ) : (
           <span className="text-tertiary">—</span>
         ),
