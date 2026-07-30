@@ -47,7 +47,6 @@ import {
   type BPHorasYearRow,
   type BPRentabilidadYearRow,
 } from '@/lib/calculations'
-import { displaySeniority } from '@/lib/seniority'
 import { cn } from '@/lib/utils'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
@@ -184,10 +183,7 @@ export function BPDetailModal({
                 {bp?.nombre ?? 'Brand Partner'}
               </DialogTitle>
               <DialogDescription>
-                {(data?.bp && displaySeniority(data.bp)) ??
-                  (bp && displaySeniority(bp)) ??
-                  '—'}{' '}
-                · {activeTab === 'horas' ? 'Horas' : 'Rentabilidad'}
+                {activeTab === 'horas' ? 'Horas' : 'Rentabilidad'}
               </DialogDescription>
             </div>
             <div className="flex items-center gap-2 mt-1">

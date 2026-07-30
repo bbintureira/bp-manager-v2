@@ -39,7 +39,6 @@ import {
   formatPercent,
 } from '@/lib/format'
 import { getProjectDetailFull, type Proyecto } from '@/lib/queries'
-import { displaySeniority } from '@/lib/seniority'
 import type {
   BPProjectEstado,
   ProjectBPBreakdown,
@@ -593,11 +592,6 @@ function ProjectMensualView({
                           <span className="font-medium whitespace-nowrap">
                             {b.bp_name}
                           </span>
-                          {b.bp && displaySeniority(b.bp) && (
-                            <span className="text-2xs text-tertiary">
-                              {displaySeniority(b.bp)}
-                            </span>
-                          )}
                         </div>
                       </td>
                       <Td numeric>{formatHours(Math.round(b.horas))}</Td>
@@ -743,11 +737,6 @@ function BPsMarginTable({ bps }: { bps: ProjectBPBreakdown[] }) {
                   <span className="font-medium whitespace-nowrap">
                     {b.bp_name}
                   </span>
-                  {b.bp && displaySeniority(b.bp) && (
-                    <span className="text-2xs text-tertiary">
-                      {displaySeniority(b.bp)}
-                    </span>
-                  )}
                 </div>
               </td>
               <Td numeric>{formatHours(Math.round(b.totalHoras))}</Td>

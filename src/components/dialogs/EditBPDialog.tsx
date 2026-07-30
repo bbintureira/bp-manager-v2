@@ -27,9 +27,7 @@ import {
   updateBPSueldosFullYear,
   updateBrandPartner,
   type BrandPartner,
-  type Grouper,
 } from '@/lib/queries'
-import { seniorityFromSueldo } from '@/lib/seniority'
 import { cn } from '@/lib/utils'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
@@ -39,15 +37,11 @@ interface EditBPDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   bp: BrandPartner | null
-  /** Existing groupers (canonical list from `groupers` table). */
-  existingGroupers?: Grouper[]
   onSaved?: () => void
 }
 
 interface BasicFormState {
   nombre: string
-  /** FK to groupers.id. Empty string = "no grouper". */
-  grouper_id: string
   capacidad_horas: string
   activo: 'activo' | 'inactivo'
   /** 1-12, defaults to January. Persists as `2026-MM-01`. */
@@ -65,7 +59,6 @@ function parseMesIngreso(fecha: string | null | undefined): number {
 function basicFromBP(bp: BrandPartner | null): BasicFormState {
   return {
     nombre: bp?.nombre ?? '',
-    grouper_id: bp?.grouper_id ?? '',
     capacidad_horas:
       bp?.capacidad_horas_mensual != null
         ? String(bp.capacidad_horas_mensual)
@@ -79,7 +72,6 @@ export function EditBPDialog({
   open,
   onOpenChange,
   bp,
-  existingGroupers = [],
   onSaved,
 }: EditBPDialogProps) {
   // ----- Section 1: basic
@@ -123,7 +115,6 @@ export function EditBPDialog({
   const basicDirty = useMemo(
     () =>
       basic.nombre !== initialBasic.nombre ||
-      basic.grouper_id !== initialBasic.grouper_id ||
       basic.capacidad_horas !== initialBasic.capacidad_horas ||
       basic.activo !== initialBasic.activo ||
       basic.mes_ingreso !== initialBasic.mes_ingreso,
@@ -148,7 +139,6 @@ export function EditBPDialog({
     Number.isFinite(capNum) && capNum > 0 && promedioMensual > 0
       ? promedioMensual / capNum
       : null
-  const derivedSeniority = seniorityFromSueldo(promedioMensual)
 
   // ----- handlers
   function setMonth(i: number, raw: string) {
@@ -181,10 +171,6 @@ export function EditBPDialog({
       tasks.push(
         updateBrandPartner(bp.id, {
           nombre: basic.nombre.trim(),
-          // Seniority is derived from sueldo. Persist it so legacy reads
-          // that haven't been migrated still see a consistent value.
-          seniority: derivedSeniority ?? null,
-          grouper_id: basic.grouper_id || null,
           capacidad_horas_mensual:
             Number.isFinite(capNum) && capNum > 0 ? capNum : null,
           activo: basic.activo === 'activo',
@@ -254,57 +240,19 @@ export function EditBPDialog({
               />
             </Field>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Field
-                id="eb-seniority"
-                label="Seniority"
-                hint="Se calcula automáticamente desde el sueldo promedio."
-              >
-                <div
-                  id="eb-seniority"
-                  className="h-10 px-3 rounded-md border border-border bg-base flex items-center text-sm"
-                >
-                  {derivedSeniority ?? (
-                    <span className="text-tertiary">— (cargá el sueldo)</span>
-                  )}
-                </div>
-              </Field>
-
-              <Field id="eb-activo" label="Estado" required>
-                <Select
-                  id="eb-activo"
-                  value={basic.activo}
-                  onChange={(e) =>
-                    setBasic({
-                      ...basic,
-                      activo: e.target.value as 'activo' | 'inactivo',
-                    })
-                  }
-                >
-                  <option value="activo">Activo</option>
-                  <option value="inactivo">No activo</option>
-                </Select>
-              </Field>
-            </div>
-
-            <Field
-              id="eb-grouper"
-              label="Grouper"
-              hint='Elegí uno de la lista. Para crear uno nuevo usá el botón "Groupers" en la página de BPs.'
-            >
+            <Field id="eb-activo" label="Estado" required>
               <Select
-                id="eb-grouper"
-                value={basic.grouper_id}
+                id="eb-activo"
+                value={basic.activo}
                 onChange={(e) =>
-                  setBasic({ ...basic, grouper_id: e.target.value })
+                  setBasic({
+                    ...basic,
+                    activo: e.target.value as 'activo' | 'inactivo',
+                  })
                 }
               >
-                <option value="">Sin grouper</option>
-                {existingGroupers.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.nombre}
-                  </option>
-                ))}
+                <option value="activo">Activo</option>
+                <option value="inactivo">No activo</option>
               </Select>
             </Field>
 

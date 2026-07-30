@@ -98,7 +98,7 @@ export function exportBrandPartners(rows: BPRentabilidadExportRow[]): void {
   for (const m of MONTH_LABELS) {
     monthCols.push(`Ingresos ${m}`, `Costo ${m}`, `Margen ${m}`)
   }
-  aoa.push(['Nombre', 'Seniority', 'Célula', ...monthCols])
+  aoa.push(['Nombre', ...monthCols])
   for (const row of rows) {
     const bp = row.bp
     const triplets: number[] = []
@@ -109,12 +109,7 @@ export function exportBrandPartners(rows: BPRentabilidadExportRow[]): void {
         Number(row.margenesPorMes[i]) || 0
       )
     }
-    aoa.push([
-      bp.nombre,
-      bp.seniority ?? '',
-      bp.grouper ?? '',
-      ...triplets,
-    ])
+    aoa.push([bp.nombre, ...triplets])
   }
   const ws = XLSX.utils.aoa_to_sheet(aoa)
   const wb = XLSX.utils.book_new()
@@ -139,23 +134,13 @@ export function exportBrandPartnersHoras(
     byBpMes.set(key, (byBpMes.get(key) ?? 0) + (Number(a.horas) || 0))
   }
   const aoa: (string | number)[][] = []
-  aoa.push([
-    'Nombre',
-    'Seniority',
-    'Célula',
-    ...MONTH_LABELS.map((m) => `Horas ${m}`),
-  ])
+  aoa.push(['Nombre', ...MONTH_LABELS.map((m) => `Horas ${m}`)])
   for (const bp of bps) {
     const months: number[] = []
     for (let m = 1; m <= 12; m++) {
       months.push(byBpMes.get(`${String(bp.id)}::${m}`) ?? 0)
     }
-    aoa.push([
-      bp.nombre,
-      bp.seniority ?? '',
-      bp.grouper ?? '',
-      ...months,
-    ])
+    aoa.push([bp.nombre, ...months])
   }
   const ws = XLSX.utils.aoa_to_sheet(aoa)
   const wb = XLSX.utils.book_new()
@@ -185,7 +170,7 @@ export function exportAsignaciones(
   const bpById = new Map(ctx.brandPartners.map((b) => [String(b.id), b]))
 
   const aoa: (string | number)[][] = []
-  aoa.push(['Proyecto', 'BP', 'Célula', 'Mes', 'Horas asignadas'])
+  aoa.push(['Proyecto', 'BP', 'Mes', 'Horas asignadas'])
   for (const a of asignaciones) {
     const horas = Number(a.horas) || 0
     if (horas <= 0) continue
@@ -195,7 +180,6 @@ export function exportAsignaciones(
     aoa.push([
       proyecto?.nombre ?? '—',
       bp?.nombre ?? '—',
-      bp?.grouper ?? '',
       MONTH_LABELS[mes - 1] ?? String(mes),
       Math.round(horas * 100) / 100,
     ])

@@ -21,7 +21,6 @@ import {
   type BrandPartner,
   type Proyecto,
 } from '@/lib/queries'
-import { displaySeniority } from '@/lib/seniority'
 import { getMonthLabel } from '@/components/ui/month-picker'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
@@ -140,15 +139,11 @@ export function NewAsignacionDialog({
                 <option value="" disabled>
                   Elegí un BP…
                 </option>
-                {brandPartners.map((bp) => {
-                  const sen = displaySeniority(bp)
-                  return (
-                    <option key={String(bp.id)} value={String(bp.id)}>
-                      {bp.nombre}
-                      {sen ? ` · ${sen}` : ''}
-                    </option>
-                  )
-                })}
+                {brandPartners.map((bp) => (
+                  <option key={String(bp.id)} value={String(bp.id)}>
+                    {bp.nombre}
+                  </option>
+                ))}
               </Select>
             </Field>
 

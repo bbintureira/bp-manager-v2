@@ -67,7 +67,6 @@ import {
   type Sueldo,
 } from '@/lib/queries'
 import { matchesQuery, useSearch } from '@/hooks/useSearch'
-import { displaySeniority } from '@/lib/seniority'
 import { exportAsignaciones } from '@/utils/exportToExcel'
 import { importAsignaciones } from '@/utils/importFromExcel'
 import { ExportButton } from '@/components/ui/export-button'
@@ -707,10 +706,7 @@ export function AsignacionesPage() {
                 ? `${data.proyecto.nombre}${data.proyecto.tipo ? ` · ${data.proyecto.tipo}` : ''}`
                 : 'Cargando proyecto…'
               : bpData?.bp
-                ? (() => {
-                    const sen = displaySeniority(bpData.bp)
-                    return `${bpData.bp.nombre}${sen ? ` · ${sen}` : ''}`
-                  })()
+                ? bpData.bp.nombre
                 : 'Cargando BP…'
         }
         action={
@@ -862,10 +858,7 @@ export function AsignacionesPage() {
                 rowById={(id) => {
                   const bp = brandPartners.find((b) => String(b.id) === id)
                   return bp
-                    ? {
-                        primary: bp.nombre,
-                        secondary: displaySeniority(bp) ?? undefined,
-                      }
+                    ? { primary: bp.nombre }
                     : { primary: 'BP desconocido' }
                 }}
                 annualHoursForRow={(id) =>
@@ -1182,11 +1175,6 @@ const bpColumns: DataTableColumn<BPAnnualSummary>[] = [
     render: (_v, row) => (
       <div className="flex flex-col gap-0.5 min-w-[160px]">
         <span className="font-medium whitespace-nowrap">{row.bp.nombre}</span>
-        {displaySeniority(row.bp) && (
-          <span className="text-2xs text-tertiary whitespace-nowrap">
-            {displaySeniority(row.bp)}
-          </span>
-        )}
       </div>
     ),
   },
@@ -1491,15 +1479,11 @@ function AddBpDialog({
                 <option value="" disabled>
                   Elegí un BP…
                 </option>
-                {availableBps.map((bp) => {
-                  const sen = displaySeniority(bp)
-                  return (
-                    <option key={String(bp.id)} value={String(bp.id)}>
-                      {bp.nombre}
-                      {sen ? ` · ${sen}` : ''}
-                    </option>
-                  )
-                })}
+                {availableBps.map((bp) => (
+                  <option key={String(bp.id)} value={String(bp.id)}>
+                    {bp.nombre}
+                  </option>
+                ))}
               </Select>
             </Field>
           )}

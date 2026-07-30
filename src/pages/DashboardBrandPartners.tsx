@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Pencil, Plus, Settings2, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/components/layout/app-layout'
@@ -8,7 +8,6 @@ import { NewBPDialog } from '@/components/dialogs/NewBPDialog'
 import { EditBPDialog } from '@/components/dialogs/EditBPDialog'
 import { BPDetailModal } from '@/components/dialogs/BPDetailModal'
 import { ConfirmDialog } from '@/components/dialogs/ConfirmDialog'
-import { GroupersManagerDialog } from '@/components/dialogs/GroupersManagerDialog'
 import { Button } from '@/components/ui/button'
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
 import { KpiCard } from '@/components/ui/kpi-card'
@@ -46,14 +45,11 @@ import {
   deleteBrandPartner,
   getAnnualSnapshot,
   getDashboardSnapshot,
-  getGroupers,
   type AnnualSnapshot,
   type BrandPartner,
   type DashboardSnapshot,
-  type Grouper,
 } from '@/lib/queries'
 import { matchesQuery, useSearch } from '@/hooks/useSearch'
-import { displaySeniority } from '@/lib/seniority'
 import {
   exportBrandPartners,
   exportBrandPartnersHoras,
@@ -94,21 +90,9 @@ export function DashboardBrandPartners() {
   const [detailing, setDetailing] = useState<BrandPartner | null>(null)
   const [deleting, setDeleting] = useState<BrandPartner | null>(null)
 
-  const [grouperFilter, setGrouperFilter] = useState<string>('')
   const [activoFilter, setActivoFilter] = useState<'activos' | 'inactivos' | 'todos'>(
     'activos'
   )
-  const [groupersOpen, setGroupersOpen] = useState(false)
-  const [canonicalGroupers, setCanonicalGroupers] = useState<Grouper[]>([])
-
-  const loadGroupers = useCallback(async () => {
-    const rows = await getGroupers()
-    setCanonicalGroupers(rows)
-  }, [])
-
-  useEffect(() => {
-    void loadGroupers()
-  }, [loadGroupers])
 
   const { query: searchQuery } = useSearch()
 
@@ -140,11 +124,6 @@ export function DashboardBrandPartners() {
   const refetch = useCallback(
     () => fetchData(view, mes),
     [fetchData, view, mes]
-  )
-
-  const filterableGroupers = useMemo(
-    () => [...canonicalGroupers].sort((a, b) => a.nombre.localeCompare(b.nombre)),
-    [canonicalGroupers]
   )
 
   // Build per-tab rows once. Both tabs filter on the same set of BPs but
@@ -205,7 +184,6 @@ export function DashboardBrandPartners() {
 
   function bpPasses(bp: BrandPartner): boolean {
     if (!matchesQuery(bp.nombre, searchQuery)) return false
-    if (grouperFilter && (bp.grouper_id ?? '') !== grouperFilter) return false
     const isActive = bp.activo !== false
     if (activoFilter === 'activos' && !isActive) return false
     if (activoFilter === 'inactivos' && isActive) return false
@@ -221,7 +199,7 @@ export function DashboardBrandPartners() {
         (r) => bpPasses(r.bp) && r.horasAsignadas > 0
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allHorasRows, searchQuery, grouperFilter, activoFilter]
+    [allHorasRows, searchQuery, activoFilter]
   )
   const filteredRentabilidad = useMemo(
     () =>
@@ -229,17 +207,17 @@ export function DashboardBrandPartners() {
         (r) => bpPasses(r.bp) && r.byProject.length > 0
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allRentabilidadRows, searchQuery, grouperFilter, activoFilter]
+    [allRentabilidadRows, searchQuery, activoFilter]
   )
   const filteredHorasAnnual = useMemo(
     () => allHorasAnnual.filter((r) => bpPasses(r.bp)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allHorasAnnual, searchQuery, grouperFilter, activoFilter]
+    [allHorasAnnual, searchQuery, activoFilter]
   )
   const filteredRentabilidadAnnual = useMemo(
     () => allRentabilidadAnnual.filter((r) => bpPasses(r.bp)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allRentabilidadAnnual, searchQuery, grouperFilter, activoFilter]
+    [allRentabilidadAnnual, searchQuery, activoFilter]
   )
 
   // KPIs adapt to the active tab. Horas shows team utilization;
@@ -310,9 +288,19 @@ export function DashboardBrandPartners() {
         0
       )
       const totalLibres = filteredHoras.reduce((s, r) => s + r.horasLibres, 0)
+      const totalCostoLibres = filteredHoras.reduce(
+        (s, r) => s + r.costoHorasLibres,
+        0
+      )
       const ocupacion =
         totalContratadas > 0 ? (totalAsignadas / totalContratadas) * 100 : 0
-      return { kind: 'mes' as const, activos, ocupacion, totalLibres }
+      return {
+        kind: 'mes' as const,
+        activos,
+        ocupacion,
+        totalLibres,
+        totalCostoLibres,
+      }
     }
     const totalContratadas = filteredHorasAnnual.reduce(
       (s, r) => s + r.totalContratadas,
@@ -326,12 +314,22 @@ export function DashboardBrandPartners() {
       (s, r) => s + r.totalLibres,
       0
     )
+    const totalCostoLibres = filteredHorasAnnual.reduce(
+      (s, r) => s + r.costoHorasLibres,
+      0
+    )
     const ocupacion =
       totalContratadas > 0 ? (totalAsignadas / totalContratadas) * 100 : 0
     // Year has 12 months — fixed denominator so the metric is comparable
     // across teams of different sizes.
     const libresPromedioMes = totalLibres / 12
-    return { kind: 'año' as const, activos, ocupacion, libresPromedioMes }
+    return {
+      kind: 'año' as const,
+      activos,
+      ocupacion,
+      libresPromedioMes,
+      totalCostoLibres,
+    }
   }, [
     tab,
     view,
@@ -357,29 +355,6 @@ export function DashboardBrandPartners() {
         <option value="inactivos">No activos</option>
         <option value="todos">Todos</option>
       </Select>
-      <Select
-        aria-label="Filtrar por grouper"
-        value={grouperFilter}
-        onChange={(e) => setGrouperFilter(e.target.value)}
-        className="w-auto pr-8 max-w-[200px]"
-      >
-        <option value="">Todos los groupers</option>
-        {filterableGroupers.map((g) => (
-          <option key={g.id} value={g.id}>
-            {g.nombre}
-          </option>
-        ))}
-      </Select>
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        onClick={() => setGroupersOpen(true)}
-        title="Gestionar lista de groupers"
-      >
-        <Settings2 className="w-3.5 h-3.5" />
-        Groupers
-      </Button>
     </div>
   )
 
@@ -461,10 +436,7 @@ export function DashboardBrandPartners() {
             <UploadButton
               label="Subir Excel"
               onFile={importBrandPartners}
-              onComplete={() => {
-                refetch()
-                void loadGroupers()
-              }}
+              onComplete={refetch}
               disabled={!snapshot || loading}
             />
             <Button onClick={() => setOpenNew(true)}>
@@ -478,20 +450,13 @@ export function DashboardBrandPartners() {
       <NewBPDialog
         open={openNew}
         onOpenChange={setOpenNew}
-        existingGroupers={canonicalGroupers}
         onCreated={refetch}
       />
       <EditBPDialog
         open={editing !== null}
         onOpenChange={(o) => !o && setEditing(null)}
         bp={editing}
-        existingGroupers={canonicalGroupers}
         onSaved={refetch}
-      />
-      <GroupersManagerDialog
-        open={groupersOpen}
-        onOpenChange={setGroupersOpen}
-        onChanged={loadGroupers}
       />
       <BPDetailModal
         open={detailing !== null}
@@ -535,9 +500,14 @@ export function DashboardBrandPartners() {
 
       {error && <ErrorBanner message={error} />}
 
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+      <div
+        className={cn(
+          'grid grid-cols-2 gap-3 mb-6',
+          tab === 'horas' ? 'lg:grid-cols-4' : 'lg:grid-cols-3'
+        )}
+      >
         {loading || !snapshot ? (
-          <KpiSkeletonGrid count={3} />
+          <KpiSkeletonGrid count={tab === 'horas' ? 4 : 3} />
         ) : kpiStats.kind === 'mes' ? (
           <>
             <KpiCard
@@ -554,6 +524,16 @@ export function DashboardBrandPartners() {
               value={formatCompactHours(Math.round(kpiStats.totalLibres))}
               fullValue={formatHours(Math.round(kpiStats.totalLibres))}
               meta="del mes"
+            />
+            <KpiCard
+              label={withInfo('Costo libres total', TOOLTIPS.costoHorasLibresColumna)}
+              value={
+                <span className={kpiStats.totalCostoLibres > 0 ? 'text-warning' : undefined}>
+                  {formatCompactCurrency(kpiStats.totalCostoLibres)}
+                </span>
+              }
+              fullValue={formatCurrency(kpiStats.totalCostoLibres)}
+              meta="ociosidad del mes"
             />
           </>
         ) : kpiStats.kind === 'año' ? (
@@ -572,6 +552,16 @@ export function DashboardBrandPartners() {
               value={formatCompactHours(Math.round(kpiStats.libresPromedioMes))}
               fullValue={formatHours(Math.round(kpiStats.libresPromedioMes))}
               meta="por mes"
+            />
+            <KpiCard
+              label={withInfo('Costo libres total', TOOLTIPS.costoHorasLibresColumna)}
+              value={
+                <span className={kpiStats.totalCostoLibres > 0 ? 'text-warning' : undefined}>
+                  {formatCompactCurrency(kpiStats.totalCostoLibres)}
+                </span>
+              }
+              fullValue={formatCurrency(kpiStats.totalCostoLibres)}
+              meta="ociosidad del año"
             />
           </>
         ) : kpiStats.kind === 'rentabilidad-mes' ? (
@@ -862,11 +852,6 @@ function horasColumns(
           <IngresoPill bp={row.bp} />
         </span>
       ),
-    },
-    {
-      key: 'seniority',
-      header: 'Seniority',
-      render: (_v, row) => displaySeniority(row.bp) ?? '—',
     },
     {
       key: 'horasContratadas',

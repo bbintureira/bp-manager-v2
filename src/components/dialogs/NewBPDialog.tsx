@@ -16,8 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { getMonthLabel } from '@/components/ui/month-picker'
-import { createBrandPartner, type Grouper } from '@/lib/queries'
-import { seniorityFromSueldo } from '@/lib/seniority'
+import { createBrandPartner } from '@/lib/queries'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
 const MES_OPTIONS = MONTHS.map((m) => ({ value: m, label: getMonthLabel(m) }))
@@ -26,15 +25,11 @@ const INGRESO_YEAR = 2026
 interface NewBPDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Existing groupers (canonical list from `groupers` table). */
-  existingGroupers?: Grouper[]
   onCreated?: () => void
 }
 
 interface FormState {
   nombre: string
-  /** FK to `groupers.id`. Empty string = "no grouper". */
-  grouper_id: string
   capacidad_horas: string
   activo: 'activo' | 'inactivo'
   /** 1-12, defaults to January 2026. */
@@ -46,7 +41,6 @@ interface FormState {
 
 const initial: FormState = {
   nombre: '',
-  grouper_id: '',
   capacidad_horas: '160',
   activo: 'activo',
   mes_ingreso: 1,
@@ -57,7 +51,6 @@ const initial: FormState = {
 export function NewBPDialog({
   open,
   onOpenChange,
-  existingGroupers = [],
   onCreated,
 }: NewBPDialogProps) {
   const [form, setForm] = useState<FormState>(initial)
@@ -86,7 +79,6 @@ export function NewBPDialog({
       : null
 
   const valid = form.nombre.trim().length > 0
-  const derivedSeniority = seniorityFromSueldo(promedioMensual)
 
   function setMonth(i: number, raw: string) {
     setForm((prev) => {
@@ -111,9 +103,6 @@ export function NewBPDialog({
     setSubmitting(true)
     const result = await createBrandPartner({
       nombre: form.nombre.trim(),
-      // Derived from sueldo (no manual input).
-      seniority: derivedSeniority ?? null,
-      grouper_id: form.grouper_id || null,
       // The scalar `sueldo_mensual` mirrors the average of months with a
       // non-zero value (so it represents the BP's typical paycheck, not
       // an annualized number diluted by zero months).
@@ -162,57 +151,19 @@ export function NewBPDialog({
               />
             </Field>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Field
-                id="nb-seniority"
-                label="Seniority"
-                hint="Se calcula automáticamente desde el sueldo."
-              >
-                <div
-                  id="nb-seniority"
-                  className="h-10 px-3 rounded-md border border-border bg-base flex items-center text-sm"
-                >
-                  {derivedSeniority ?? (
-                    <span className="text-tertiary">— (cargá el sueldo)</span>
-                  )}
-                </div>
-              </Field>
-
-              <Field id="nb-activo" label="Estado" required>
-                <Select
-                  id="nb-activo"
-                  value={form.activo}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      activo: e.target.value as 'activo' | 'inactivo',
-                    })
-                  }
-                >
-                  <option value="activo">Activo</option>
-                  <option value="inactivo">No activo</option>
-                </Select>
-              </Field>
-            </div>
-
-            <Field
-              id="nb-grouper"
-              label="Grouper"
-              hint='Elegí uno de la lista. Para crear uno nuevo usá el botón "Groupers" en la página de BPs.'
-            >
+            <Field id="nb-activo" label="Estado" required>
               <Select
-                id="nb-grouper"
-                value={form.grouper_id}
+                id="nb-activo"
+                value={form.activo}
                 onChange={(e) =>
-                  setForm({ ...form, grouper_id: e.target.value })
+                  setForm({
+                    ...form,
+                    activo: e.target.value as 'activo' | 'inactivo',
+                  })
                 }
               >
-                <option value="">Sin grouper</option>
-                {existingGroupers.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.nombre}
-                  </option>
-                ))}
+                <option value="activo">Activo</option>
+                <option value="inactivo">No activo</option>
               </Select>
             </Field>
 

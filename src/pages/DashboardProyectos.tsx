@@ -359,7 +359,15 @@ export function DashboardProyectos() {
     const costs = monthlyActive.reduce((s, r) => s + r.cost, 0)
     const margin = revenue - costs
     const marginPercent = calculateMargin(revenue, costs)
-    return { revenue, costs, margin, marginPercent }
+    const difComercialPlata = monthlyActive.reduce(
+      (s, r) => s + r.diffPlataComercial,
+      0
+    )
+    const difComercialHoras = monthlyActive.reduce(
+      (s, r) => s + r.diffHorasComercial,
+      0
+    )
+    return { revenue, costs, margin, marginPercent, difComercialPlata, difComercialHoras }
   }, [monthlyActive])
 
   const annualTotals = useMemo(() => {
@@ -367,7 +375,15 @@ export function DashboardProyectos() {
     const costs = annualActive.reduce((s, r) => s + r.cost, 0)
     const margin = revenue - costs
     const marginPercent = calculateMargin(revenue, costs)
-    return { revenue, costs, margin, marginPercent }
+    const difComercialPlata = annualActive.reduce(
+      (s, r) => s + r.diffPlataComercial,
+      0
+    )
+    const difComercialHoras = annualActive.reduce(
+      (s, r) => s + r.diffHorasComercial,
+      0
+    )
+    return { revenue, costs, margin, marginPercent, difComercialPlata, difComercialHoras }
   }, [annualActive])
 
   const topbarActions = (
@@ -556,9 +572,9 @@ export function DashboardProyectos() {
       {error && <ErrorBanner message={error} />}
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
         {loading || !data ? (
-          <KpiSkeletonGrid count={4} />
+          <KpiSkeletonGrid count={5} />
         ) : data.mode === 'monthly' ? (
           <>
             <KpiCard
@@ -576,6 +592,11 @@ export function DashboardProyectos() {
             <RentabilidadKpi
               total={monthlyTotals.margin}
               data={data.rentabilidad}
+              scope="mes"
+            />
+            <DifComercialKpi
+              plata={monthlyTotals.difComercialPlata}
+              horas={monthlyTotals.difComercialHoras}
               scope="mes"
             />
             <KpiCard
@@ -605,6 +626,11 @@ export function DashboardProyectos() {
             <RentabilidadKpi
               total={annualTotals.margin}
               data={data.rentabilidad}
+              scope="año"
+            />
+            <DifComercialKpi
+              plata={annualTotals.difComercialPlata}
+              horas={annualTotals.difComercialHoras}
               scope="año"
             />
             <KpiCard
@@ -1060,6 +1086,47 @@ function RentabilidadKpi({
         )
       }
       meta={meta}
+    />
+  )
+}
+
+/** Headline KPI for the aggregate commercial difference (Σ HC − HA valued
+ *  at the project rate). Green = over-quoted (agency saves), red = under. */
+function DifComercialKpi({
+  plata,
+  horas,
+  scope,
+}: {
+  plata: number
+  horas: number
+  scope: 'mes' | 'año'
+}) {
+  const rHoras = Math.round(horas)
+  const positive = plata > 0
+  const negative = plata < 0
+  const sign = positive ? '+' : negative ? '−' : ''
+  const hSign = rHoras > 0 ? '+' : rHoras < 0 ? '−' : ''
+  const display = `${sign}${formatCompactCurrency(Math.abs(plata))}`
+  const fullValue = `${sign}${formatCurrency(Math.abs(plata))}`
+  const color = positive
+    ? 'var(--success)'
+    : negative
+      ? 'var(--danger)'
+      : undefined
+  return (
+    <KpiCard
+      label={withInfo('Dif. comercial', TOOLTIPS.diferenciaComercialColumna)}
+      fullValue={fullValue}
+      value={color ? <span style={{ color }}>{display}</span> : display}
+      meta={
+        rHoras === 0
+          ? scope === 'año'
+            ? 'del año'
+            : 'del mes'
+          : `${hSign}${formatHours(Math.abs(rHoras))} · ${
+              scope === 'año' ? 'del año' : 'del mes'
+            }`
+      }
     />
   )
 }

@@ -27,7 +27,6 @@ import {
   updateBPSueldosFullYear,
   type BrandPartner,
 } from '@/lib/queries'
-import { displaySeniority } from '@/lib/seniority'
 import { cn } from '@/lib/utils'
 
 const CURRENT_YEAR = new Date().getFullYear()
@@ -117,7 +116,6 @@ export function BPSueldosFullYearModal({
               Sueldos mensuales · {bp?.nombre ?? 'BP'} · {CURRENT_YEAR}
             </DialogTitle>
             <DialogDescription>
-              {bp && displaySeniority(bp) ? `${displaySeniority(bp)} · ` : ''}
               Editá el sueldo de cada mes. Se guarda en{' '}
               <code className="text-2xs">sueldos</code>.
             </DialogDescription>

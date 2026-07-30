@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
  * Excel importers — one per dashboard section. Each parses the first
  * worksheet of the uploaded file using the column headers that the
  * matching exporter writes, then upserts into Supabase. Rows whose
- * referenced entity (project / BP / grouper) can't be resolved by
+ * referenced entity (project / BP) can't be resolved by
  * name are skipped and counted; the rest commit.
  */
 
@@ -356,14 +356,7 @@ export async function importProyectos(file: File): Promise<ImportResult> {
 interface BPRow {
   id: string
   nombre: string
-  seniority: string | null
-  grouper_id: string | null
   activo: boolean | null
-}
-
-interface GrouperRow {
-  id: string
-  nombre: string
 }
 
 export async function importBrandPartners(file: File): Promise<ImportResult> {
@@ -372,22 +365,18 @@ export async function importBrandPartners(file: File): Promise<ImportResult> {
     return { success: false, imported: 0, skipped: 0, message: 'El archivo está vacío.' }
   }
 
-  const [bpRes, grRes] = await Promise.all([
-    supabase
-      .from('brand_partners')
-      .select('id, nombre, seniority, grouper_id, activo'),
-    supabase.from('groupers').select('id, nombre'),
-  ])
-  if (bpRes.error || grRes.error) {
+  const bpRes = await supabase
+    .from('brand_partners')
+    .select('id, nombre, activo')
+  if (bpRes.error) {
     return {
       success: false,
       imported: 0,
       skipped: rows.length,
-      message: `No se pudo leer BPs / groupers: ${(bpRes.error ?? grRes.error)?.message ?? ''}`,
+      message: `No se pudo leer BPs: ${bpRes.error.message ?? ''}`,
     }
   }
   const bpByName = indexByName(((bpRes.data ?? []) as BPRow[]))
-  const grByName = indexByName(((grRes.data ?? []) as GrouperRow[]))
 
   let imported = 0
   let skipped = 0
@@ -399,12 +388,6 @@ export async function importBrandPartners(file: File): Promise<ImportResult> {
       skipped++
       continue
     }
-    const celulaName = trimStr(getCol(row, 'Célula')) || trimStr(getCol(row, 'Celula'))
-    let grouper_id: string | null = null
-    if (celulaName) {
-      const gr = grByName.get(celulaName.toLowerCase())
-      grouper_id = gr ? String(gr.id) : null
-    }
 
     // We don't import the 'Horas Ene…Dic' columns: they're aggregates
     // across projects, so they can't be deterministically split back
@@ -415,7 +398,7 @@ export async function importBrandPartners(file: File): Promise<ImportResult> {
       const { error } = await supabase
         .from('brand_partners')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .update({ nombre, grouper_id } as any)
+        .update({ nombre } as any)
         .eq('id', found.id)
       if (error) {
         skipped++
@@ -426,7 +409,7 @@ export async function importBrandPartners(file: File): Promise<ImportResult> {
       const { error } = await supabase
         .from('brand_partners')
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .insert({ nombre, grouper_id, activo: true } as any)
+        .insert({ nombre, activo: true } as any)
       if (error) {
         skipped++
         errors.push(`${nombre}: ${error.message}`)

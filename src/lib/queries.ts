@@ -47,11 +47,6 @@ export interface Proyecto {
 export interface BrandPartner {
   id: Id
   nombre: string
-  seniority: string | null
-  /** FK to `groupers.id`. Nullable when no grouper assigned. */
-  grouper_id: string | null
-  /** Joined `groupers.nombre` — populated by reads that select the relation. */
-  grouper: string | null
   /** Denormalized cache: NewBPDialog / EditBPDialog write this as the
    *  AVG of monthly sueldos. Do NOT use for per-month rate calculations
    *  (it returns an annual average disguised as a "monthly" salary).
@@ -114,25 +109,13 @@ export async function getProyectos(opts: GetProyectosOptions = {}): Promise<Proy
 export async function getBrandPartners(): Promise<BrandPartner[]> {
   const { data, error } = await supabase
     .from('brand_partners')
-    .select('*, grouper_rel:groupers(nombre)')
+    .select('*')
     .order('nombre', { ascending: true })
   if (error) {
     logQueryError('getBrandPartners', error)
     return []
   }
-  return (data ?? []).map(flattenGrouper) as unknown as BrandPartner[]
-}
-
-/**
- * Postgres returns the joined `groupers` row as `grouper_rel: { nombre }`
- * (or null). Pull `nombre` up to `grouper` so the rest of the app can keep
- * reading `bp.grouper` as a flat string. `grouper_id` is already on the row.
- */
-function flattenGrouper(row: Record<string, unknown>): Record<string, unknown> {
-  const rel = row['grouper_rel'] as { nombre?: string } | null | undefined
-  const { grouper_rel: _gr, ...rest } = row as { grouper_rel?: unknown }
-  void _gr
-  return { ...rest, grouper: rel?.nombre ?? null }
+  return (data ?? []) as BrandPartner[]
 }
 
 export async function getAsignaciones(mes?: number): Promise<Asignacion[]> {
@@ -591,14 +574,14 @@ export async function getBPDetail(bp_id: Id): Promise<BPDetailData> {
     (async () => {
       const { data, error } = await supabase
         .from('brand_partners')
-        .select('*, grouper_rel:groupers(nombre)')
+        .select('*')
         .eq('id', bp_id)
         .maybeSingle()
       if (error) {
         logQueryError('getBPDetail.bp', error)
         return null
       }
-      return data ? (flattenGrouper(data) as unknown as BrandPartner) : null
+      return data ? (data as unknown as BrandPartner) : null
     })(),
     (async () => {
       const { data, error } = await supabase
@@ -653,11 +636,6 @@ export interface ProyectoHonorarioMensual {
 
 export interface NewBrandPartnerData {
   nombre: string
-  /** Derived from sueldo (no longer a manual input). Nullable when
-   * the BP is created without a sueldo loaded. */
-  seniority?: string | null
-  /** FK to `groupers.id`. Null = no grouper assigned. */
-  grouper_id?: string | null
   sueldo_mensual?: number | null
   capacidad_horas_mensual?: number | null
   activo?: boolean
@@ -857,8 +835,6 @@ export interface UpdateProyectoData {
 
 export interface UpdateBrandPartnerData {
   nombre?: string
-  seniority?: string | null
-  grouper_id?: string | null
   sueldo_mensual?: number | null
   capacidad_horas_mensual?: number | null
   activo?: boolean
@@ -932,64 +908,6 @@ export function deleteProyecto(id: Id): Promise<DeleteResult> {
  */
 export function deleteBrandPartner(id: Id): Promise<DeleteResult> {
   return deleteRow('brand_partners', id, 'deleteBrandPartner')
-}
-
-// ----- groupers (canonical list used in BP form dropdowns) --------------
-
-export interface Grouper {
-  id: string
-  nombre: string
-  created_at: string
-}
-
-export async function getGroupers(): Promise<Grouper[]> {
-  const { data, error } = await supabase
-    .from('groupers')
-    .select('*')
-    .order('nombre', { ascending: true })
-  if (error) {
-    logQueryError('getGroupers', error)
-    return []
-  }
-  return (data ?? []) as Grouper[]
-}
-
-export async function createGrouper(nombre: string): Promise<CreateResult<Grouper>> {
-  const trimmed = nombre.trim()
-  if (!trimmed) return { success: false, error: 'Nombre vacío' }
-  const { data, error } = await supabase
-    .from('groupers')
-    .insert({ nombre: trimmed })
-    .select()
-    .single()
-  if (error) {
-    logQueryError('createGrouper', error)
-    return { success: false, error: error.message }
-  }
-  return { success: true, data: data as Grouper }
-}
-
-export function deleteGrouper(id: string): Promise<DeleteResult> {
-  return deleteRow('groupers', id, 'deleteGrouper')
-}
-
-export async function updateGrouper(
-  id: string,
-  nombre: string
-): Promise<CreateResult<Grouper>> {
-  const trimmed = nombre.trim()
-  if (!trimmed) return { success: false, error: 'Nombre vacío' }
-  const { data, error } = await supabase
-    .from('groupers')
-    .update({ nombre: trimmed })
-    .eq('id', id)
-    .select()
-    .single()
-  if (error) {
-    logQueryError('updateGrouper', error)
-    return { success: false, error: error.message }
-  }
-  return { success: true, data: data as Grouper }
 }
 
 // ----- allowlist (admin-managed list, no longer gates auth) -------------
@@ -1186,7 +1104,7 @@ export async function getBPAsignacionesFullYear(
   const [bpRes, asignaciones, proyectos] = await Promise.all([
     supabase
       .from('brand_partners')
-      .select('*, grouper_rel:groupers(nombre)')
+      .select('*')
       .eq('id', bp_id)
       .maybeSingle(),
     (async () => {
@@ -1206,7 +1124,7 @@ export async function getBPAsignacionesFullYear(
     logQueryError('getBPAsignacionesFullYear.bp', bpRes.error)
   }
   const bp = bpRes.data
-    ? (flattenGrouper(bpRes.data) as unknown as BrandPartner)
+    ? (bpRes.data as unknown as BrandPartner)
     : null
   const projectMap = new Map(proyectos.map((p) => [String(p.id), p]))
   const byProj = new Map<string, number[]>()
