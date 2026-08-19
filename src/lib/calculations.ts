@@ -716,9 +716,13 @@ export function summarizeProjectsPeriod(
 
 export interface BPAnnualSummary {
   bp: BrandPartner
-  /** Sum of sueldos across all months on file. */
+  /** Σ sueldo over the months where the BP actually has assigned hours.
+   *  Months with a sueldo row but no work (a BP who left mid-year, or
+   *  future months loaded ahead of their asignaciones) are NOT counted —
+   *  otherwise "Sueldo año" over-reports against every other aggregate,
+   *  which all restrict to months with hours. */
   totalSueldo: number
-  /** Mean sueldo over months that have a row. */
+  /** Mean sueldo over those same months (only the ones with a value). */
   avgSueldo: number
   /** Total hours logged across the year. */
   totalHoras: number
@@ -741,10 +745,13 @@ export function summarizeBPsAnnual(
     const byMonth = MONTHS.map((m) =>
       calculateBPSummary(bp, asignaciones, sueldos, m)
     )
-    const ownSueldos = sueldos.filter((s) => same(s.bp_id, bp.id))
-    const totalSueldo = ownSueldos.reduce((s, x) => s + num(x.sueldo), 0)
+    // Restricted to months with assigned hours — same rule as
+    // `bpRentabilidadAnnualAggregate`. See the field docs above.
+    const activeMonths = byMonth.filter((m) => m.totalHoras > 0)
+    const totalSueldo = activeMonths.reduce((s, x) => s + x.sueldoMensual, 0)
+    const monthsWithSueldo = activeMonths.filter((x) => x.sueldoMensual > 0)
     const avgSueldo =
-      ownSueldos.length === 0 ? 0 : totalSueldo / ownSueldos.length
+      monthsWithSueldo.length === 0 ? 0 : totalSueldo / monthsWithSueldo.length
     const totalHoras = byMonth.reduce((s, x) => s + x.totalHoras, 0)
     const ownAsignaciones = asignaciones.filter((a) => same(a.bp_id, bp.id))
     const uniqueProjects = new Set(
