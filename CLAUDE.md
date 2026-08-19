@@ -96,6 +96,13 @@ y los dashboards consuman sin tocar la UI ni el Excel.
   dimensión de año (ver "Schema invariants"). La respuesta lo aclara en `meta`.
 - `vercel.json` excluye `/api/` del rewrite SPA (`/((?!api/).*)`), y
   `tsconfig.json` incluye `api` para que `npm run build` lo tipee.
+- **Los imports relativos van con extensión `.js` explícita.** El proyecto es
+  `"type": "module"` y Vercel compila la función sin bundlear: `api/export.js`
+  y `src/lib/calculations.js` quedan separados en `/var/task` y se resuelven
+  con ESM puro, que no acepta specifiers sin extensión. Sin el `.js` la función
+  muere al cargar el módulo y toda invocación da 500 (ni 401 ni 405 llegan a
+  ejecutarse). `tsc` no lo detecta porque en TypeScript el `.js` resuelve al
+  `.ts` igual — el fallo aparece recién deployado.
 
 ### Pages & layout
 

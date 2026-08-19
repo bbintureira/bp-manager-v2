@@ -15,19 +15,27 @@
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
 
+// NO SACAR la extensión `.js` de los imports relativos de abajo. El proyecto
+// es `"type": "module"`, y el runtime de Node de Vercel compila esta función
+// sin bundlear: `api/export.ts` y `src/lib/calculations.ts` salen como dos
+// `.js` separados en /var/task y se resuelven con ESM puro, que exige la
+// extensión explícita. Sin ella la función muere al cargar el módulo
+// (ERR_MODULE_NOT_FOUND) y TODA invocación devuelve 500 — ni siquiera llega a
+// contestar 401 o 405. En TypeScript el `.js` resuelve al `.ts` igual, así que
+// `npm run build` no se entera; el fallo sólo aparece deployado.
 import {
   bpHorasMonthRow,
   bpRentabilidadMonthRow,
   getMesIngreso,
   summarizeAllProjects,
-} from '../src/lib/calculations'
+} from '../src/lib/calculations.js'
 import type {
   Asignacion,
   BrandPartner,
   Id,
   Proyecto,
   Sueldo,
-} from '../src/lib/queries'
+} from '../src/lib/queries.js'
 
 // --- Vercel Node handler signature ----------------------------------------
 // Typed locally so the repo doesn't need `@vercel/node` just for two
