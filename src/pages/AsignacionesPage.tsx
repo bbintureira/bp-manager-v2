@@ -41,6 +41,8 @@ import { StatusBadge } from '@/components/ui/status-badge'
 import { formatCurrency, formatHours, formatNumber, formatPercent } from '@/lib/format'
 import {
   HOURS_PER_MONTH,
+  capacidadBPForMonth,
+  type CapacidadMensual,
   getMesEgreso,
   getMesIngreso,
   summarizeAllProjectsRentabilidad,
@@ -58,6 +60,7 @@ import {
   getProjectAsignacionesFullYear,
   getProyectos,
   getSueldos,
+  getBPCapacidadesMensualesAll,
   updateAsignacionFullYear,
   type Asignacion,
   type BPAsignacionesFullYear,
@@ -82,15 +85,12 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
 function annualHoursForBP(
   bp: BrandPartner | null | undefined,
   sueldos: Sueldo[] = [],
-  asignaciones: Asignacion[] = []
+  asignaciones: Asignacion[] = [],
+  capacidades: CapacidadMensual[] = []
 ): number {
   if (!bp) return HOURS_PER_MONTH * 12
   const mesIngreso = getMesIngreso(bp)
   const mesEgreso = getMesEgreso(bp, sueldos)
-  const capacidad =
-    bp.capacidad_horas_mensual != null && Number(bp.capacidad_horas_mensual) > 0
-      ? Number(bp.capacidad_horas_mensual)
-      : HOURS_PER_MONTH
   const monthsWithAsig = new Set<number>()
   for (const a of asignaciones) {
     if (String(a.bp_id) !== String(bp.id)) continue
@@ -99,7 +99,11 @@ function annualHoursForBP(
     if (Number(a.horas) <= 0) continue
     monthsWithAsig.add(m)
   }
-  return capacidad * monthsWithAsig.size
+  // Capacity is per-month now, so sum it over the active months instead of
+  // multiplying a single scalar by their count.
+  let total = 0
+  for (const m of monthsWithAsig) total += capacidadBPForMonth(bp, capacidades, m)
+  return total
 }
 
 // Both modes use the same edit state shape — the key just means different
@@ -117,6 +121,7 @@ export function AsignacionesPage() {
    *  so the utilization denominators in this page stop at their last
    *  paid month instead of always running through December. */
   const [allSueldos, setAllSueldos] = useState<Sueldo[]>([])
+  const [allCapacidades, setAllCapacidades] = useState<CapacidadMensual[]>([])
   /** All persisted asignaciones across projects. Used to compute each BP's
    *  annual "contratadas" = months_with_asignacion × capacidad. */
   const [allAsignaciones, setAllAsignaciones] = useState<Asignacion[]>([])
@@ -271,21 +276,31 @@ export function AsignacionesPage() {
     setLoading(true)
     setError(null)
     try {
-      const [ps, bps, asignaciones, sueldos] = await Promise.all([
+      const [ps, bps, asignaciones, sueldos, capacidades] = await Promise.all([
         getProyectos(),
         getBrandPartners(),
         getAsignaciones(),
         getSueldos(),
+        getBPCapacidadesMensualesAll(),
       ])
       setProyectos(ps)
       setBrandPartners(bps)
       setAllSueldos(sueldos)
+      setAllCapacidades(capacidades)
       setAllAsignaciones(asignaciones)
       // Show every project — including ones without any asignaciones yet.
       // This is the natural landing point to add BPs to a freshly-created
       // project. Sort by hours desc so the active ones float up; ties
       // broken by name.
-      const rows = summarizeProjectsAnnual(ps, asignaciones, sueldos)
+      const rows = summarizeProjectsAnnual(
+        ps,
+        asignaciones,
+        sueldos,
+        bps,
+        undefined,
+        undefined,
+        capacidades
+      )
       rows.sort((a, b) => {
         if (a.totalHoras !== b.totalHoras) return b.totalHoras - a.totalHoras
         return a.proyecto.nombre.localeCompare(b.proyecto.nombre)
@@ -299,7 +314,13 @@ export function AsignacionesPage() {
       setAllBpRows(bpRows)
 
       // Rentabilidad summary using the new model.
-      const renta = summarizeAllProjectsRentabilidad(ps, asignaciones, bps, sueldos)
+      const renta = summarizeAllProjectsRentabilidad(
+        ps,
+        asignaciones,
+        bps,
+        sueldos,
+        capacidades
+      )
       const rentaMap = new Map(renta.map((r) => [String(r.proyecto.id), r]))
       setRentaByProyecto(rentaMap)
     } catch (e) {
@@ -374,13 +395,19 @@ export function AsignacionesPage() {
     // summed across the BPs in the table.
     const availableHoras = bpOrder.reduce(
       (s, id) =>
-        s + annualHoursForBP(bpById.get(id), allSueldos, allAsignaciones),
+        s +
+        annualHoursForBP(
+          bpById.get(id),
+          allSueldos,
+          allAsignaciones,
+          allCapacidades
+        ),
       0
     )
     const avgUtilization =
       availableHoras === 0 ? 0 : (totalHoras / availableHoras) * 100
     return { totalHoras, numBps, avgUtilization, availableHoras }
-  }, [bpOrder, edits, brandPartners, allSueldos, allAsignaciones])
+  }, [bpOrder, edits, brandPartners, allSueldos, allAsignaciones, allCapacidades])
 
   // ----- derived (per-project "all" mode)
   const visibleAllRows = useMemo(() => {
@@ -534,12 +561,13 @@ export function AsignacionesPage() {
     const annualHours = annualHoursForBP(
       bpData?.bp,
       allSueldos,
-      allAsignaciones
+      allAsignaciones,
+      allCapacidades
     )
     const utilization =
       annualHours === 0 ? 0 : (totalHoras / annualHours) * 100
     return { totalHoras, numProyectos, utilization, annualHours }
-  }, [proyectoOrder, bpEdits, bpData, allSueldos, allAsignaciones])
+  }, [proyectoOrder, bpEdits, bpData, allSueldos, allAsignaciones, allCapacidades])
 
   const setBpCell = useCallback((proyecto_id: string, idx: number, raw: string) => {
     setBpEdits((prev) => {
@@ -865,7 +893,8 @@ export function AsignacionesPage() {
                   annualHoursForBP(
                     brandPartners.find((b) => String(b.id) === id) ?? null,
                     allSueldos,
-                    allAsignaciones
+                    allAsignaciones,
+                    allCapacidades
                   )
                 }
                 onCell={setCell}

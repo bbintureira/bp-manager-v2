@@ -23,7 +23,9 @@ import { Button } from '@/components/ui/button'
 import { TableSkeleton } from '@/components/ui/loading-states'
 import { getMonthLabel } from '@/components/ui/month-picker'
 import {
+  getBPCapacidadFullYear,
   getBPSueldosFullYear,
+  updateBPCapacidadFullYear,
   updateBPSueldosFullYear,
   updateBrandPartner,
   type BrandPartner,
@@ -80,12 +82,19 @@ export function EditBPDialog({
     basicFromBP(bp)
   )
 
-  // ----- Section 2: monthly sueldos
+  // ----- Section 2: monthly sueldos + monthly contracted capacity
   const [sueldos, setSueldos] = useState<number[]>(() => new Array(12).fill(0))
   const [initialSueldos, setInitialSueldos] = useState<number[] | null>(null)
+  const [capacidades, setCapacidades] = useState<number[]>(() =>
+    new Array(12).fill(0)
+  )
+  const [initialCapacidades, setInitialCapacidades] = useState<
+    number[] | null
+  >(null)
   const [loadingSueldos, setLoadingSueldos] = useState(false)
 
   const [fillAll, setFillAll] = useState('')
+  const [fillAllCap, setFillAllCap] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   // ----- Re-prime when the dialog opens for a (possibly different) BP.
@@ -95,15 +104,26 @@ export function EditBPDialog({
     setBasic(fresh)
     setInitialBasic(fresh)
     setFillAll('')
+    setFillAllCap('')
     setLoadingSueldos(true)
     setInitialSueldos(null)
+    setInitialCapacidades(null)
     let cancelled = false
     void (async () => {
-      const rows = await getBPSueldosFullYear(bp.id)
+      // Capacity months with no row come back prefilled with the BP's
+      // current scalar, so opening the grid shows today's value in all 12
+      // and you only touch the months that actually change.
+      const [sueldoRows, capRows] = await Promise.all([
+        getBPSueldosFullYear(bp.id),
+        getBPCapacidadFullYear(bp.id, bp.capacidad_horas_mensual),
+      ])
       if (cancelled) return
-      const arr = rows.map((r) => r.sueldo)
+      const arr = sueldoRows.map((r) => r.sueldo)
       setSueldos(arr)
       setInitialSueldos(arr.slice())
+      const caps = capRows.map((r) => r.horas)
+      setCapacidades(caps)
+      setInitialCapacidades(caps.slice())
       setLoadingSueldos(false)
     })()
     return () => {
@@ -126,7 +146,12 @@ export function EditBPDialog({
     return sueldos.some((v, i) => v !== initialSueldos[i])
   }, [sueldos, initialSueldos])
 
-  const dirty = basicDirty || sueldosDirty
+  const capacidadesDirty = useMemo(() => {
+    if (!initialCapacidades) return false
+    return capacidades.some((v, i) => v !== initialCapacidades[i])
+  }, [capacidades, initialCapacidades])
+
+  const dirty = basicDirty || sueldosDirty || capacidadesDirty
 
   const valid = basic.nombre.trim().length > 0
 
@@ -135,14 +160,33 @@ export function EditBPDialog({
   const monthsWithValue = sueldos.filter((v) => v > 0).length
   const promedioMensual =
     monthsWithValue === 0 ? 0 : totalAnio / monthsWithValue
+  // Reference costo/h uses the average capacity over the months that
+  // actually have a sueldo — with per-month capacity a single scalar would
+  // misprice a BP whose dedication changes mid-year.
+  const capPromedio = useMemo(() => {
+    const activos = capacidades.filter((_, i) => sueldos[i] > 0)
+    const base = activos.length > 0 ? activos : capacidades
+    const withValue = base.filter((v) => v > 0)
+    if (withValue.length > 0) {
+      return withValue.reduce((s, x) => s + x, 0) / withValue.length
+    }
+    return Number.isFinite(capNum) && capNum > 0 ? capNum : 0
+  }, [capacidades, sueldos, capNum])
   const costoHora =
-    Number.isFinite(capNum) && capNum > 0 && promedioMensual > 0
-      ? promedioMensual / capNum
-      : null
+    capPromedio > 0 && promedioMensual > 0 ? promedioMensual / capPromedio : null
 
   // ----- handlers
   function setMonth(i: number, raw: string) {
     setSueldos((prev) => {
+      const next = prev.slice()
+      const parsed = Number(raw)
+      next[i] = Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+      return next
+    })
+  }
+
+  function setMonthCapacidad(i: number, raw: string) {
+    setCapacidades((prev) => {
       const next = prev.slice()
       const parsed = Number(raw)
       next[i] = Number.isFinite(parsed) ? Math.max(0, parsed) : 0
@@ -156,9 +200,16 @@ export function EditBPDialog({
     setSueldos(new Array(12).fill(v))
   }
 
+  function applyFillAllCap() {
+    const v = Number(fillAllCap)
+    if (!Number.isFinite(v) || v < 0) return
+    setCapacidades(new Array(12).fill(v))
+  }
+
   function resetChanges() {
     setBasic(initialBasic)
     if (initialSueldos) setSueldos(initialSueldos.slice())
+    if (initialCapacidades) setCapacidades(initialCapacidades.slice())
   }
 
   async function onSubmit(e: FormEvent) {
@@ -181,6 +232,18 @@ export function EditBPDialog({
             : {}),
         }).then((r) => ({
           kind: 'datos básicos',
+          ok: r.success,
+          error: r.success ? undefined : r.error,
+        }))
+      )
+    }
+    if (capacidadesDirty) {
+      tasks.push(
+        updateBPCapacidadFullYear(
+          bp.id,
+          MONTHS.map((mes, i) => ({ mes, horas: capacidades[i] }))
+        ).then((r) => ({
+          kind: 'horas contratadas mensuales',
           ok: r.success,
           error: r.success ? undefined : r.error,
         }))
@@ -296,7 +359,15 @@ export function EditBPDialog({
             </div>
 
             {/* Section 2 */}
-            <SectionTitle className="mt-2">Sueldos mensuales</SectionTitle>
+            <SectionTitle className="mt-2">
+              Horas contratadas y sueldos por mes
+            </SectionTitle>
+            <p className="text-2xs text-tertiary -mt-1">
+              La capacidad de cada mes se carga por separado: arranca con el
+              valor actual del BP y sólo tocás los meses que cambian. El campo
+              «Capacidad horas / mes» de arriba queda como valor por defecto
+              para los meses sin fila propia.
+            </p>
 
             <div className="flex items-center justify-end gap-2">
               <span className="text-2xs text-tertiary">
@@ -315,9 +386,35 @@ export function EditBPDialog({
               </span>
             </div>
 
-            {/* Fill-all shortcut */}
+            {/* Fill-all shortcuts */}
             <div className="bg-base border border-border rounded-md p-3 grid grid-cols-[1fr_auto] gap-2 items-center">
-              <Field id="eb-fill-all" label="Llenar todos los meses con">
+              <Field id="eb-fill-all-cap" label="Llenar todas las horas con">
+                <Input
+                  id="eb-fill-all-cap"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="1"
+                  value={fillAllCap}
+                  onChange={(e) => setFillAllCap(e.target.value)}
+                  placeholder="160"
+                  disabled={loadingSueldos}
+                />
+              </Field>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={applyFillAllCap}
+                disabled={
+                  loadingSueldos ||
+                  fillAllCap.length === 0 ||
+                  !Number.isFinite(Number(fillAllCap))
+                }
+              >
+                Aplicar
+              </Button>
+              <Field id="eb-fill-all" label="Llenar todos los sueldos con">
                 <Input
                   id="eb-fill-all"
                   type="number"
@@ -346,28 +443,35 @@ export function EditBPDialog({
             </div>
 
             {/* Header row */}
-            <div className="grid grid-cols-[100px_1fr] gap-3 px-2 pt-1">
+            <div className="grid grid-cols-[100px_110px_1fr] gap-3 px-2 pt-1">
               <span className="text-2xs font-medium uppercase tracking-wider text-tertiary">
                 Mes
+              </span>
+              <span className="text-2xs font-medium uppercase tracking-wider text-tertiary">
+                Horas contr.
               </span>
               <span className="text-2xs font-medium uppercase tracking-wider text-tertiary">
                 Sueldo
               </span>
             </div>
 
-            {loadingSueldos || !initialSueldos ? (
+            {loadingSueldos || !initialSueldos || !initialCapacidades ? (
               <TableSkeleton rows={6} />
             ) : (
               <div className="flex flex-col">
                 {MONTHS.map((mes, i) => {
                   const v = sueldos[i]
+                  const c = capacidades[i]
                   const initVal = initialSueldos?.[i]
-                  const changed = initVal !== undefined && initVal !== v
+                  const initCap = initialCapacidades?.[i]
+                  const changed =
+                    (initVal !== undefined && initVal !== v) ||
+                    (initCap !== undefined && initCap !== c)
                   return (
                     <div
                       key={mes}
                       className={cn(
-                        'grid grid-cols-[100px_1fr] gap-3 items-center px-2 py-1.5 border-b border-border last:border-0',
+                        'grid grid-cols-[100px_110px_1fr] gap-3 items-center px-2 py-1.5 border-b border-border last:border-0',
                         changed && 'bg-accent-soft/40'
                       )}
                     >
@@ -378,7 +482,17 @@ export function EditBPDialog({
                         type="number"
                         inputMode="decimal"
                         min="0"
+                        step="1"
+                        aria-label={`Horas contratadas ${getMonthLabel(mes)}`}
+                        value={Number.isFinite(c) ? c : 0}
+                        onChange={(e) => setMonthCapacidad(i, e.target.value)}
+                      />
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
                         step="0.01"
+                        aria-label={`Sueldo ${getMonthLabel(mes)}`}
                         value={Number.isFinite(v) ? v : 0}
                         onChange={(e) => setMonth(i, e.target.value)}
                       />

@@ -116,7 +116,8 @@ export function BPDetailModal({
           fresh,
           snap.asignaciones,
           snap.proyectos,
-          snap.sueldos
+          snap.sueldos,
+          snap.capacidadesMensuales
         ),
         rentaYear: bpRentabilidadYear(
           fresh,
@@ -124,7 +125,8 @@ export function BPDetailModal({
           snap.sueldos,
           snap.proyectos,
           snap.honorariosMensuales,
-          snap.horasMensuales
+          snap.horasMensuales,
+          snap.capacidadesMensuales
         ),
       })
       setLoading(false)

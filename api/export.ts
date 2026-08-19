@@ -28,6 +28,7 @@ import {
   bpRentabilidadMonthRow,
   getMesIngreso,
   summarizeAllProjects,
+  type CapacidadMensual,
 } from '../src/lib/calculations.js'
 import type {
   Asignacion,
@@ -205,6 +206,7 @@ export default async function handler(
       sueldosRaw,
       honorariosRaw,
       horasRaw,
+      capacidadesRaw,
     ] = await Promise.all([
       fetchAll<Proyecto>('proyectos'),
       fetchAll<BrandPartner>('brand_partners'),
@@ -217,6 +219,10 @@ export default async function handler(
       fetchAll<Record<string, unknown>>(
         'horas_proyecto',
         'proyecto_id,mes,horas'
+      ),
+      fetchAll<Record<string, unknown>>(
+        'horas_contratadas',
+        'bp_id,mes,horas'
       ),
     ])
 
@@ -241,6 +247,14 @@ export default async function handler(
       mes: number
       horas: number
     }[]
+    // Per-BP monthly contracted capacity (`horas_contratadas`). Months with
+    // no row fall back to the BP's scalar, then to 160 — same rule the UI
+    // applies, so `contratadas` matches the Horas tab month by month.
+    const capacidades: CapacidadMensual[] = capacidadesRaw.map((r) => ({
+      bp_id: r.bp_id as Id,
+      mes: Number(r.mes),
+      horas: Number(r.horas) || 0,
+    }))
 
     const months: Record<string, unknown> = {}
 
@@ -253,7 +267,8 @@ export default async function handler(
           asignacionesNorm,
           proyectos,
           mes,
-          sueldos
+          sueldos,
+          capacidades
         )
         const rent = bpRentabilidadMonthRow(
           bp,
@@ -262,7 +277,8 @@ export default async function handler(
           proyectos,
           honorariosMensuales,
           mes,
-          horasMensuales
+          horasMensuales,
+          capacidades
         )
         // "BP con datos en el mes": worked hours, or a sueldo actually
         // loaded for that mes. Inactive BPs are included — the `activo`
@@ -314,7 +330,8 @@ export default async function handler(
         mes,
         brandPartners,
         honorariosMensuales,
-        horasMensuales
+        horasMensuales,
+        capacidades
       )
         .filter((p) => p.totalHoras > 0 || p.revenue > 0)
         .map((p) => ({

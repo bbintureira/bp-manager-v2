@@ -65,7 +65,8 @@ export function summarizeProjectRentabilidad(
   proyecto: Proyecto,
   asignaciones: Asignacion[],
   brandPartners: BrandPartner[],
-  sueldos: Sueldo[]
+  sueldos: Sueldo[],
+  capacidades: CapacidadMensual[] = []
 ): ProjectRentabilidadSummary {
   const own = asignaciones.filter((a) => same(a.proyecto_id, proyecto.id))
   const totalHoras = own.reduce((s, a) => s + num(a.horas), 0)
@@ -77,7 +78,8 @@ export function summarizeProjectRentabilidad(
     if (!bp) continue
     // Per-month rate (sueldo[mes] / cap_bp) — using the asignacion's mes
     // so monthly sueldo variations and BP capacities are respected.
-    weightedCost += valorHoraBPForMonth(bp, sueldos, a.mes) * num(a.horas)
+    weightedCost +=
+      valorHoraBPForMonth(bp, sueldos, a.mes, capacidades) * num(a.horas)
   }
   const costoHoraPromedioBps =
     totalHoras > 0 ? weightedCost / totalHoras : 0
@@ -99,10 +101,17 @@ export function summarizeAllProjectsRentabilidad(
   proyectos: Proyecto[],
   asignaciones: Asignacion[],
   brandPartners: BrandPartner[],
-  sueldos: Sueldo[]
+  sueldos: Sueldo[],
+  capacidades: CapacidadMensual[] = []
 ): ProjectRentabilidadSummary[] {
   return proyectos.map((p) =>
-    summarizeProjectRentabilidad(p, asignaciones, brandPartners, sueldos)
+    summarizeProjectRentabilidad(
+      p,
+      asignaciones,
+      brandPartners,
+      sueldos,
+      capacidades
+    )
   )
 }
 
@@ -258,7 +267,8 @@ export function calculateProjectMargin(
   mes: number,
   brandPartners?: BrandPartner[],
   honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[],
-  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[]
+  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[],
+  capacidades: CapacidadMensual[] = []
 ): ProjectMonthSummary {
   const own = asignaciones.filter(
     (a) => a.mes === mes && same(a.proyecto_id, proyecto.id)
@@ -285,7 +295,10 @@ export function calculateProjectMargin(
   const bpRateById = new Map<string, number>()
   for (const id of bpIds) {
     const bp = bpsById.get(id)
-    bpRateById.set(id, bp ? valorHoraBPForMonth(bp, sueldos, mes) : 0)
+    bpRateById.set(
+      id,
+      bp ? valorHoraBPForMonth(bp, sueldos, mes, capacidades) : 0
+    )
   }
 
   // Average BP rate across the BPs assigned this month — used only for the
@@ -354,7 +367,8 @@ export function summarizeAllProjects(
   mes: number,
   brandPartners?: BrandPartner[],
   honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[],
-  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[]
+  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[],
+  capacidades: CapacidadMensual[] = []
 ): ProjectMonthSummary[] {
   return proyectos.map((p) =>
     calculateProjectMargin(
@@ -364,7 +378,8 @@ export function summarizeAllProjects(
       mes,
       brandPartners,
       honorariosMensuales,
-      horasMensuales
+      horasMensuales,
+      capacidades
     )
   )
 }
@@ -551,7 +566,8 @@ export function summarizeProjectsAnnual(
   sueldos: Sueldo[],
   brandPartners?: BrandPartner[],
   honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[],
-  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[]
+  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[],
+  capacidades: CapacidadMensual[] = []
 ): ProjectAnnualSummary[] {
   return proyectos.map((p) => {
     const byMonth = MONTHS.map((m) =>
@@ -562,7 +578,8 @@ export function summarizeProjectsAnnual(
         m,
         brandPartners,
         honorariosMensuales,
-        horasMensuales
+        horasMensuales,
+        capacidades
       )
     )
     // Only sum the months where the project actually has BPs doing work
@@ -634,7 +651,8 @@ export function summarizeProjectsPeriod(
   meses: number[],
   brandPartners?: BrandPartner[],
   honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[],
-  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[]
+  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[],
+  capacidades: CapacidadMensual[] = []
 ): ProjectAnnualSummary[] {
   const inScope = new Set(meses)
   return proyectos.map((p) => {
@@ -646,7 +664,8 @@ export function summarizeProjectsPeriod(
         m,
         brandPartners,
         honorariosMensuales,
-        horasMensuales
+        horasMensuales,
+        capacidades
       )
     )
     const months = byMonth.filter(
@@ -819,7 +838,8 @@ export function buildBPsForProject(
   brandPartners: BrandPartner[],
   sueldos: Sueldo[],
   honorariosMensuales: { mes: number; honorarios: number }[] = [],
-  horasMensuales: { mes: number; horas: number }[] = []
+  horasMensuales: { mes: number; horas: number }[] = [],
+  capacidades: CapacidadMensual[] = []
 ): ProjectBPBreakdown[] {
   const own = asignaciones.filter((a) => same(a.proyecto_id, proyecto.id))
   const totalProject = own.reduce((s, a) => s + num(a.horas), 0)
@@ -892,12 +912,10 @@ export function buildBPsForProject(
       totalProject > 0 ? (totalHoras / totalProject) * 100 : 0
     const bp = bpMap.get(bpId) ?? null
 
-    // BP's contracted hours (capacidad). Falls back to 160 if not set —
-    // matches the canonical formula used in `valorHoraBPForMonth`.
-    const capBp =
-      bp && bp.capacidad_horas_mensual != null && num(bp.capacidad_horas_mensual) > 0
-        ? num(bp.capacidad_horas_mensual)
-        : HOURS_PER_MONTH
+    // BP's contracted hours (capacidad), per month — same resolution as
+    // `valorHoraBPForMonth`. Resolved inside the month loop below.
+    const capBpForMes = (mes: number) =>
+      bp ? capacidadBPForMonth(bp, capacidades, mes) : HOURS_PER_MONTH
     // Cost = Σ horas[mes] × (sueldo[mes] / cap_bp). Sueldo varies per month.
     const sueldoByMes = new Map<number, number>()
     let totalSueldo = 0
@@ -912,6 +930,7 @@ export function buildBPsForProject(
     for (let i = 0; i < 12; i++) {
       const horas = horasPorMes[i]
       const sueldo = sueldoByMes.get(i + 1) ?? 0
+      const capBp = capBpForMes(i + 1)
       const rateBp = capBp > 0 && sueldo > 0 ? sueldo / capBp : 0
       ratePerHourBpPorMes[i] = rateBp
       costosPorMes[i] = horas * rateBp
@@ -965,7 +984,8 @@ export function calculateBPProjectMargin(
   bp: BrandPartner,
   asignaciones: Asignacion[],
   sueldos: Sueldo[],
-  _año?: number
+  _año?: number,
+  capacidades: CapacidadMensual[] = []
 ): {
   totalHoras: number
   horasPorMes: number[]
@@ -990,11 +1010,7 @@ export function calculateBPProjectMargin(
     valorHoraProyecto(proyecto)
   const ingresosAnuales = totalHoras * ratePerHourProyecto
 
-  // BP's contracted hours (cap). Matches `valorHoraBPForMonth` rule.
-  const capBp =
-    bp.capacidad_horas_mensual != null && num(bp.capacidad_horas_mensual) > 0
-      ? num(bp.capacidad_horas_mensual)
-      : HOURS_PER_MONTH
+  // BP's contracted hours (cap), per month. Matches `valorHoraBPForMonth`.
   const sueldoByMes = new Map<number, number>()
   for (const s of sueldos) {
     if (same(s.bp_id, bp.id)) sueldoByMes.set(s.mes, num(s.sueldo))
@@ -1003,6 +1019,7 @@ export function calculateBPProjectMargin(
   for (let i = 0; i < 12; i++) {
     const horas = horasPorMes[i]
     const sueldo = sueldoByMes.get(i + 1) ?? 0
+    const capBp = capacidadBPForMonth(bp, capacidades, i + 1)
     costosAnuales += horas * (capBp > 0 ? sueldo / capBp : 0)
   }
   const marginPercent =
@@ -1123,6 +1140,39 @@ export function calculateBPsAnnualKpis(
 
 const MONTHS_ALL = Array.from({ length: 12 }, (_, i) => i + 1)
 
+/** One row of `horas_contratadas`: the BP's contracted capacity for a
+ *  given month. */
+export interface CapacidadMensual {
+  bp_id: Id
+  mes: number
+  horas: number
+}
+
+/**
+ * The BP's contracted capacity for `mes`. Resolution order:
+ *   1. the `horas_contratadas` row for (bp, mes) — the source of truth,
+ *   2. the scalar `bp.capacidad_horas_mensual` (legacy / not-yet-migrated),
+ *   3. `HOURS_PER_MONTH`.
+ *
+ * A row holding 0 is honoured as a deliberate "no capacity this month"
+ * rather than falling through to the scalar — that's how you model a BP
+ * whose dedication drops to nothing without deleting the row.
+ */
+export function capacidadBPForMonth(
+  bp: BrandPartner,
+  capacidades: CapacidadMensual[],
+  mes: number
+): number {
+  const row = capacidades.find(
+    (c) => c.mes === mes && same(c.bp_id, bp.id)
+  )
+  if (row) return num(row.horas)
+  if (bp.capacidad_horas_mensual != null && num(bp.capacidad_horas_mensual) > 0) {
+    return num(bp.capacidad_horas_mensual)
+  }
+  return HOURS_PER_MONTH
+}
+
 /** Per-BP per-month sueldo lookup with fallback. */
 function pickSueldoMensual(
   bp: BrandPartner,
@@ -1138,13 +1188,11 @@ function pickSueldoMensual(
 function valorHoraBPForMonth(
   bp: BrandPartner,
   sueldos: Sueldo[],
-  mes: number
+  mes: number,
+  capacidades: CapacidadMensual[] = []
 ): number {
   const sueldo = pickSueldoMensual(bp, sueldos, mes)
-  const cap =
-    bp.capacidad_horas_mensual != null
-      ? num(bp.capacidad_horas_mensual)
-      : HOURS_PER_MONTH
+  const cap = capacidadBPForMonth(bp, capacidades, mes)
   if (cap <= 0 || sueldo <= 0) return 0
   return sueldo / cap
 }
@@ -1216,7 +1264,8 @@ export interface BPProjectHorasRow {
 
 export interface BPHorasMonthRow {
   bp: BrandPartner
-  /** capacidad_horas_mensual (or 160 default). */
+  /** Contracted capacity for this mes: the `horas_contratadas` row, else
+   *  the scalar `capacidad_horas_mensual`, else 160. */
   horasContratadas: number
   /** Σ horas asignadas in `mes`. */
   horasAsignadas: number
@@ -1244,7 +1293,8 @@ export function bpHorasMonthRow(
   asignaciones: Asignacion[],
   proyectos: Proyecto[],
   mes: number,
-  sueldos: Sueldo[] = []
+  sueldos: Sueldo[] = [],
+  capacidades: CapacidadMensual[] = []
 ): BPHorasMonthRow {
   // Months outside the BP's active window [ingreso, egreso] contribute
   // zero capacity / hours. Without sueldos passed in, only the ingreso
@@ -1263,10 +1313,10 @@ export function bpHorasMonthRow(
     }
   }
 
-  const horasContratadas =
-    bp.capacidad_horas_mensual != null
-      ? num(bp.capacidad_horas_mensual)
-      : HOURS_PER_MONTH
+  // Per-month capacity: the `horas_contratadas` row for this mes, then the
+  // scalar, then 160. A BP whose dedication changes mid-year is modelled by
+  // the rows, not by the scalar.
+  const horasContratadas = capacidadBPForMonth(bp, capacidades, mes)
 
   const own = asignaciones.filter(
     (a) => a.mes === mes && same(a.bp_id, bp.id)
@@ -1277,7 +1327,8 @@ export function bpHorasMonthRow(
   const horasOciosas = Math.max(0, horasLibres)
   // Value the idle hours at the BP's hourly cost (sueldo[mes] / capacidad).
   // Uses the clamped value — being over-assigned costs nothing extra.
-  const costoHorasLibres = horasOciosas * valorHoraBPForMonth(bp, sueldos, mes)
+  const costoHorasLibres =
+    horasOciosas * valorHoraBPForMonth(bp, sueldos, mes, capacidades)
   const ocupacion =
     horasContratadas > 0 ? (horasAsignadas / horasContratadas) * 100 : 0
 
@@ -1329,10 +1380,11 @@ export function bpHorasPeriodRow(
   asignaciones: Asignacion[],
   proyectos: Proyecto[],
   meses: number[],
-  sueldos: Sueldo[] = []
+  sueldos: Sueldo[] = [],
+  capacidades: CapacidadMensual[] = []
 ): BPHorasMonthRow {
   const rows = meses.map((m) =>
-    bpHorasMonthRow(bp, asignaciones, proyectos, m, sueldos)
+    bpHorasMonthRow(bp, asignaciones, proyectos, m, sueldos, capacidades)
   )
   const active = rows.filter((r) => r.horasAsignadas > 0)
   const horasContratadas = active.reduce((s, r) => s + r.horasContratadas, 0)
@@ -1382,12 +1434,13 @@ export function bpHorasYear(
   bp: BrandPartner,
   asignaciones: Asignacion[],
   proyectos: Proyecto[],
-  sueldos: Sueldo[] = []
+  sueldos: Sueldo[] = [],
+  capacidades: CapacidadMensual[] = []
 ): BPHorasYearRow {
   return {
     bp,
     byMonth: MONTHS_ALL.map((m) =>
-      bpHorasMonthRow(bp, asignaciones, proyectos, m, sueldos)
+      bpHorasMonthRow(bp, asignaciones, proyectos, m, sueldos, capacidades)
     ),
   }
 }
@@ -1445,7 +1498,8 @@ export function bpRentabilidadMonthRow(
   proyectos: Proyecto[],
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
   mes: number,
-  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = []
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = [],
+  capacidades: CapacidadMensual[] = []
 ): BPRentabilidadMonthRow {
   // Outside the BP's active window — no costo, no ingreso.
   if (!inActiveWindow(bp, mes, sueldos)) {
@@ -1465,7 +1519,7 @@ export function bpRentabilidadMonthRow(
   }
 
   const sueldoMensual = pickSueldoMensual(bp, sueldos, mes)
-  const valorHoraBP = valorHoraBPForMonth(bp, sueldos, mes)
+  const valorHoraBP = valorHoraBPForMonth(bp, sueldos, mes, capacidades)
 
   const own = asignaciones.filter(
     (a) => a.mes === mes && same(a.bp_id, bp.id)
@@ -1588,7 +1642,8 @@ export function bpRentabilidadPeriodRow(
   proyectos: Proyecto[],
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
   meses: number[],
-  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = []
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = [],
+  capacidades: CapacidadMensual[] = []
 ): BPRentabilidadMonthRow {
   const rows = meses.map((m) =>
     bpRentabilidadMonthRow(
@@ -1598,7 +1653,8 @@ export function bpRentabilidadPeriodRow(
       proyectos,
       honorariosMensuales,
       m,
-      horasMensuales
+      horasMensuales,
+      capacidades
     )
   )
   const active = rows.filter((r) => r.byProject.length > 0)
@@ -1670,7 +1726,8 @@ export function bpRentabilidadYear(
   sueldos: Sueldo[],
   proyectos: Proyecto[],
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
-  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = []
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = [],
+  capacidades: CapacidadMensual[] = []
 ): BPRentabilidadYearRow {
   return {
     bp,
@@ -1682,7 +1739,8 @@ export function bpRentabilidadYear(
         proyectos,
         honorariosMensuales,
         m,
-        horasMensuales
+        horasMensuales,
+        capacidades
       )
     ),
   }
@@ -1714,15 +1772,12 @@ export function bpHorasAnnualAggregate(
   bp: BrandPartner,
   asignaciones: Asignacion[],
   proyectos: Proyecto[],
-  sueldos: Sueldo[] = []
+  sueldos: Sueldo[] = [],
+  capacidades: CapacidadMensual[] = []
 ): BPHorasAnnualAggregate {
-  const year = bpHorasYear(bp, asignaciones, proyectos, sueldos)
+  const year = bpHorasYear(bp, asignaciones, proyectos, sueldos, capacidades)
   const mesIngreso = getMesIngreso(bp)
   const mesEgreso = getMesEgreso(bp, sueldos)
-  const capacidad =
-    bp.capacidad_horas_mensual != null && num(bp.capacidad_horas_mensual) > 0
-      ? num(bp.capacidad_horas_mensual)
-      : HOURS_PER_MONTH
 
   // Annual `Contratadas` only counts months (in window) where this BP
   // actually has at least one asignacion loaded — so future / empty
@@ -1736,7 +1791,12 @@ export function bpHorasAnnualAggregate(
     if (num(a.horas) <= 0) continue
     monthsWithAsig.add(m)
   }
-  const totalContratadas = monthsWithAsig.size * capacidad
+  // Capacity now varies per month, so the annual total is the sum over the
+  // active months — not `months × a single scalar`.
+  let totalContratadas = 0
+  for (const m of monthsWithAsig) {
+    totalContratadas += year.byMonth[m - 1]?.horasContratadas ?? 0
+  }
   const totalAsignadas = year.byMonth.reduce(
     (s, m) => s + m.horasAsignadas,
     0
@@ -1802,7 +1862,8 @@ export function bpRentabilidadAnnualAggregate(
   sueldos: Sueldo[],
   proyectos: Proyecto[],
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
-  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = []
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = [],
+  capacidades: CapacidadMensual[] = []
 ): BPRentabilidadAnnualAggregate {
   const year = bpRentabilidadYear(
     bp,
@@ -1810,7 +1871,8 @@ export function bpRentabilidadAnnualAggregate(
     sueldos,
     proyectos,
     honorariosMensuales,
-    horasMensuales
+    horasMensuales,
+    capacidades
   )
   const totalIngreso = year.byMonth.reduce((s, m) => s + m.ingresoCotizado, 0)
   const totalCosto = year.byMonth.reduce((s, m) => s + m.costo, 0)

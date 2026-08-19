@@ -206,7 +206,8 @@ function deriveMonthly(
       snapshot.proyectos,
       monthAsignaciones,
       snapshot.brandPartners,
-      snapshot.sueldos
+      snapshot.sueldos,
+      snapshot.capacidadesMensuales
     )
   )
   // A single month keeps the existing per-month path untouched; a quarter
@@ -220,7 +221,8 @@ function deriveMonthly(
           meses[0],
           snapshot.brandPartners,
           snapshot.honorariosMensuales,
-          snapshot.horasMensuales
+          snapshot.horasMensuales,
+          snapshot.capacidadesMensuales
         ).map(fromMonthSummary)
       : summarizeProjectsPeriod(
           snapshot.proyectos,
@@ -229,7 +231,8 @@ function deriveMonthly(
           meses,
           snapshot.brandPartners,
           snapshot.honorariosMensuales,
-          snapshot.horasMensuales
+          snapshot.horasMensuales,
+          snapshot.capacidadesMensuales
         ).map(fromAnnualSummary)
   return {
     mode: 'monthly',
@@ -245,7 +248,8 @@ function deriveAnnual(snapshot: AnnualSnapshot): AnnualData {
       snapshot.proyectos,
       snapshot.asignaciones,
       snapshot.brandPartners,
-      snapshot.sueldos
+      snapshot.sueldos,
+      snapshot.capacidadesMensuales
     )
   )
   const activeProjects = new Set(
@@ -261,7 +265,8 @@ function deriveAnnual(snapshot: AnnualSnapshot): AnnualData {
       snapshot.sueldos,
       snapshot.brandPartners,
       snapshot.honorariosMensuales,
-      snapshot.horasMensuales
+      snapshot.horasMensuales,
+      snapshot.capacidadesMensuales
     ).map(fromAnnualSummary),
     rentabilidad,
   }

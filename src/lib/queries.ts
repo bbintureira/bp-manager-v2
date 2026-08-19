@@ -182,6 +182,9 @@ export interface DashboardSnapshot {
    *  Months without a row come back missing here; callers fall back to
    *  `proyecto.horas_requeridas_mensual` then to 160. */
   horasMensuales: { proyecto_id: Id; mes: number; horas: number }[]
+  /** Per-BP per-month contracted capacity (`horas_contratadas`). Months
+   *  without a row fall back to `bp.capacidad_horas_mensual`, then 160. */
+  capacidadesMensuales: { bp_id: Id; mes: number; horas: number }[]
 }
 
 export async function getDashboardSnapshot(mes: number): Promise<DashboardSnapshot> {
@@ -192,6 +195,7 @@ export async function getDashboardSnapshot(mes: number): Promise<DashboardSnapsh
     sueldos,
     honorariosMensuales,
     horasMensuales,
+    capacidadesMensuales,
   ] = await Promise.all([
     getProyectos(),
     getBrandPartners(),
@@ -199,6 +203,7 @@ export async function getDashboardSnapshot(mes: number): Promise<DashboardSnapsh
     getSueldos(mes),
     getProyectoHonorariosMensualesAll(),
     getProyectoHorasMensualesAll(),
+    getBPCapacidadesMensualesAll(),
   ])
   return {
     proyectos,
@@ -207,6 +212,7 @@ export async function getDashboardSnapshot(mes: number): Promise<DashboardSnapsh
     sueldos,
     honorariosMensuales,
     horasMensuales,
+    capacidadesMensuales,
   }
 }
 
@@ -326,22 +332,28 @@ export async function getSalaryHistory(bp_id: Id): Promise<Sueldo[]> {
   return (data ?? []) as Sueldo[]
 }
 
-// ----- horas_contratadas (per-project per-month contracted hours) ---------
+// ----- horas_contratadas (per-BP per-month contracted capacity) -----------
+//
+// The table is keyed by BP, NOT by project: (id, bp_id, mes, horas). It is
+// the source of truth for a BP's monthly capacity — `brand_partners.
+// capacidad_horas_mensual` is only a fallback for months with no row.
+// A previous version of this file typed it as `proyecto_id`; the resulting
+// query filtered on a column that doesn't exist, so it always returned [].
 
 export interface HorasContratadas {
   id: Id
-  proyecto_id: Id
+  bp_id: Id
   mes: number
   horas: number
   created_at: string
 }
 
 export async function getHorasContratadas(
-  proyecto_id?: Id,
+  bp_id?: Id,
   mes?: number
 ): Promise<HorasContratadas[]> {
   let q = supabase.from('horas_contratadas').select('*')
-  if (proyecto_id !== undefined) q = q.eq('proyecto_id', proyecto_id)
+  if (bp_id !== undefined) q = q.eq('bp_id', bp_id)
   if (typeof mes === 'number') q = q.eq('mes', mes)
   const { data, error } = await q
   if (error) {
@@ -349,6 +361,25 @@ export async function getHorasContratadas(
     return []
   }
   return (data ?? []) as HorasContratadas[]
+}
+
+/** Every `horas_contratadas` row, for the dashboards. Coerces mes/horas to
+ *  Number defensively — same reason as the honorarios/horas helpers below:
+ *  a string `mes` silently breaks the `=== mes` lookups downstream. */
+export async function getBPCapacidadesMensualesAll(): Promise<
+  { bp_id: Id; mes: number; horas: number }[]
+> {
+  const { data, error } = await supabase
+    .from('horas_contratadas')
+    .select('bp_id, mes, horas')
+  if (error) {
+    logQueryError('getBPCapacidadesMensualesAll', error)
+    return []
+  }
+  return (data ?? []).map((row) => {
+    const r = row as { bp_id: Id; mes: unknown; horas: unknown }
+    return { bp_id: r.bp_id, mes: Number(r.mes), horas: Number(r.horas) || 0 }
+  })
 }
 
 // ----- annual snapshot ---------------------------------------------------
@@ -360,6 +391,7 @@ export interface AnnualSnapshot {
   sueldos: Sueldo[]
   honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[]
   horasMensuales: { proyecto_id: Id; mes: number; horas: number }[]
+  capacidadesMensuales: { bp_id: Id; mes: number; horas: number }[]
 }
 
 /** Same shape as DashboardSnapshot but with no `mes` filter — all months. */
@@ -371,6 +403,7 @@ export async function getAnnualSnapshot(): Promise<AnnualSnapshot> {
     sueldos,
     honorariosMensuales,
     horasMensuales,
+    capacidadesMensuales,
   ] = await Promise.all([
     getProyectos(),
     getBrandPartners(),
@@ -378,6 +411,7 @@ export async function getAnnualSnapshot(): Promise<AnnualSnapshot> {
     getSueldos(),
     getProyectoHonorariosMensualesAll(),
     getProyectoHorasMensualesAll(),
+    getBPCapacidadesMensualesAll(),
   ])
   return {
     proyectos,
@@ -386,6 +420,7 @@ export async function getAnnualSnapshot(): Promise<AnnualSnapshot> {
     sueldos,
     honorariosMensuales,
     horasMensuales,
+    capacidadesMensuales,
   }
 }
 
@@ -393,7 +428,6 @@ export interface ProjectDetailData {
   proyecto: Proyecto | null
   asignaciones: Asignacion[]
   sueldos: Sueldo[]
-  horasContratadas: HorasContratadas[]
   brandPartners: BrandPartner[]
   /** Length-12 array of `{ mes, honorarios }` for this project — the
    *  source of truth for revenue. Months without a row are returned as
@@ -402,6 +436,9 @@ export interface ProjectDetailData {
   /** Length-12 array of `{ mes, horas }` — required hours per month.
    *  Months without a row come back as `{ mes, horas: 0 }`. */
   horasMensuales: { mes: number; horas: number }[]
+  /** Per-BP per-month contracted capacity, for the cost side of the
+   *  per-BP margin rows. */
+  capacidadesMensuales: { bp_id: Id; mes: number; horas: number }[]
 }
 
 /** Everything we need to render the project detail modal. */
@@ -410,10 +447,10 @@ export async function getProjectDetail(proyecto_id: Id): Promise<ProjectDetailDa
     proyecto,
     asignaciones,
     sueldos,
-    horasContratadas,
     brandPartners,
     honorariosMensuales,
     horasMensuales,
+    capacidadesMensuales,
   ] = await Promise.all([
     (async () => {
       const { data, error } = await supabase
@@ -429,22 +466,22 @@ export async function getProjectDetail(proyecto_id: Id): Promise<ProjectDetailDa
     })(),
     getAsignacionesByProyecto(proyecto_id),
     getSueldos(),
-    getHorasContratadas(proyecto_id),
     getBrandPartners(),
     getProjectHonorarioFullYear(proyecto_id),
     getProjectHorasFullYear(proyecto_id),
+    getBPCapacidadesMensualesAll(),
   ])
   return {
     proyecto,
     asignaciones,
     sueldos,
-    horasContratadas,
     brandPartners,
     honorariosMensuales: honorariosMensuales.map((h) => ({
       mes: h.mes,
       honorarios: h.honorarios,
     })),
     horasMensuales: horasMensuales.map((h) => ({ mes: h.mes, horas: h.horas })),
+    capacidadesMensuales,
   }
 }
 
@@ -495,7 +532,8 @@ export async function getProjectDetailFull(
     detail.brandPartners,
     detail.sueldos,
     detail.honorariosMensuales,
-    detail.horasMensuales
+    detail.horasMensuales,
+    detail.capacidadesMensuales
   )
   const totalHoras = bps.reduce((s, x) => s + x.totalHoras, 0)
   // Booked revenue: sum of all honorarios cargados in `proyecto_honorarios_mensuales`.
@@ -1355,6 +1393,70 @@ export async function getBPSueldosFullYear(
  * Upserts up to 12 sueldo rows. Requires a UNIQUE constraint on
  * (bp_id, mes). Errors surface in the result.
  */
+export interface MonthlyCapacidad {
+  mes: number
+  horas: number
+  /** Present when the row already exists in horas_contratadas. */
+  id?: Id
+}
+
+/**
+ * The BP's contracted capacity for the full year, from `horas_contratadas`.
+ * Months without a row fall back to the BP's scalar
+ * `capacidad_horas_mensual` (then 160) so the grid opens prefilled with
+ * today's value instead of a column of zeros — editing one month is then
+ * a real edit, not a re-entry of the other eleven.
+ */
+export async function getBPCapacidadFullYear(
+  bp_id: Id,
+  fallback?: number | null
+): Promise<MonthlyCapacidad[]> {
+  const { data, error } = await supabase
+    .from('horas_contratadas')
+    .select('id, mes, horas')
+    .eq('bp_id', bp_id)
+  if (error) {
+    logQueryError('getBPCapacidadFullYear', error)
+  }
+  const base =
+    fallback != null && Number(fallback) > 0 ? Number(fallback) : HOURS_PER_MONTH
+  const byMes = new Map<number, { id: Id; horas: number }>()
+  for (const row of data ?? []) {
+    const r = row as { id: Id; mes: unknown; horas: unknown }
+    byMes.set(Number(r.mes), { id: r.id, horas: Number(r.horas) || 0 })
+  }
+  return FULL_YEAR_MONTHS.map((mes) => {
+    const hit = byMes.get(mes)
+    // A row that exists but holds 0 is a deliberate "no capacity this
+    // month" — keep it. Only missing rows take the fallback.
+    if (hit) return { mes, horas: hit.horas, id: hit.id }
+    return { mes, horas: base }
+  })
+}
+
+/** Upserts up to 12 capacity rows in `horas_contratadas`. Requires a UNIQUE
+ *  constraint on (bp_id, mes) — see migrations/2026-08-19-capacidad-bp-mensual.sql. */
+export async function updateBPCapacidadFullYear(
+  bp_id: Id,
+  capacidadPorMes: { mes: number; horas: number }[]
+): Promise<CreateResult<HorasContratadas[]>> {
+  const rows = capacidadPorMes.map((c) => ({
+    bp_id,
+    mes: c.mes,
+    horas: Math.max(0, Number(c.horas) || 0),
+  }))
+  const { data, error } = await supabase
+    .from('horas_contratadas')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .upsert(rows as any, { onConflict: 'bp_id,mes' })
+    .select()
+  if (error) {
+    logQueryError('updateBPCapacidadFullYear', error)
+    return { success: false, error: error.message }
+  }
+  return { success: true, data: (data ?? []) as HorasContratadas[] }
+}
+
 export async function updateBPSueldosFullYear(
   bp_id: Id,
   sueldosPorMes: { mes: number; sueldo: number }[]

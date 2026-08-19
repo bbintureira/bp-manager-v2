@@ -153,7 +153,8 @@ export function DashboardBrandPartners() {
         snapshot.asignaciones,
         snapshot.proyectos,
         meses,
-        snapshot.sueldos
+        snapshot.sueldos,
+        snapshot.capacidadesMensuales
       )
     )
   }, [snapshot, meses, view])
@@ -168,7 +169,8 @@ export function DashboardBrandPartners() {
         snapshot.proyectos,
         snapshot.honorariosMensuales,
         meses,
-        snapshot.horasMensuales
+        snapshot.horasMensuales,
+        snapshot.capacidadesMensuales
       )
     )
   }, [snapshot, meses, view])
@@ -180,7 +182,8 @@ export function DashboardBrandPartners() {
         bp,
         snapshot.asignaciones,
         snapshot.proyectos,
-        snapshot.sueldos
+        snapshot.sueldos,
+        snapshot.capacidadesMensuales
       )
     )
   }, [snapshot, view])
@@ -194,7 +197,8 @@ export function DashboardBrandPartners() {
         snapshot.sueldos,
         snapshot.proyectos,
         snapshot.honorariosMensuales,
-        snapshot.horasMensuales
+        snapshot.horasMensuales,
+        snapshot.capacidadesMensuales
       )
     )
   }, [snapshot, view])
@@ -436,7 +440,8 @@ export function DashboardBrandPartners() {
                       snap.sueldos,
                       snap.proyectos,
                       snap.honorariosMensuales,
-                      snap.horasMensuales
+                      snap.horasMensuales,
+                      snap.capacidadesMensuales
                     )
                     return {
                       bp,

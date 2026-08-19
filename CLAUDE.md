@@ -94,6 +94,10 @@ y los dashboards consuman sin tocar la UI ni el Excel.
   coincide con los KPIs de la pestaña Rentabilidad con filtro "Todos".
 - `?year=` se acepta y se devuelve, pero **no filtra**: el esquema no tiene
   dimensión de año (ver "Schema invariants"). La respuesta lo aclara en `meta`.
+  El plan para resolverlo está en "Plan: columna de año" más abajo.
+- `contratadas` sale de `horas_contratadas` (capacidad del BP para ESE mes), no
+  del escalar. **El contrato es aditivo**: los scripts del P&L ya consumen esta
+  estructura, así que se pueden agregar campos pero nunca renombrar ni sacar.
 - `vercel.json` excluye `/api/` del rewrite SPA (`/((?!api/).*)`), y
   `tsconfig.json` incluye `api` para que `npm run build` lo tipee.
 - **Los imports relativos van con extensión `.js` explícita.** El proyecto es
@@ -127,12 +131,21 @@ Layout is full-width: `AppLayout` has no `max-w` cap on the content area. Tables
 - **No `año` column anywhere.** `mes` is `int 1-12` only. "Vista anual" means "all months on file aggregated", not "year X". `previousMonth(mes)` wraps `1 → 12`. When wiring year support, add a column and thread it through queries.
 - **`proyectos`** real columns: `id, nombre, tipo, honorarios_cotizador, fecha_inicio, fecha_renovacion, status, descripcion, categoria_bp, created_at`. The `Proyecto` type uses `description` (mismatch — the column is `descripcion`); reads silently return undefined. Forms don't currently write description.
 - **`horas_contratadas`** real columns: `(id, bp_id, mes, horas, created_at)` — **per-BP, NOT per-project**. There is NO `proyecto_id`, NO `honorarios_cotizador`. Earlier code that tried to seed it from `createProyecto` with `proyecto_id` was always failing silently. Don't reintroduce that pattern.
+  Desde 2026-08-19 esta tabla es **la fuente de verdad de la capacidad mensual
+  del BP**. `brand_partners.capacidad_horas_mensual` quedó como fallback para
+  los meses sin fila (y luego 160). La resolución vive en un solo lugar,
+  `capacidadBPForMonth` en calculations.ts, y toda la cadena (Horas,
+  Rentabilidad, Asignaciones, modales y `/api/export`) la recibe por el
+  parámetro opcional `capacidades`. Una fila en 0 se respeta como "este mes no
+  tiene capacidad" y NO cae al escalar — así se modela una dedicación que baja
+  a cero sin borrar la fila.
 - **`proyecto_honorarios_mensuales`** is the table for per-month project honorarios: `(id, proyecto_id, mes, honorarios, created_at)`. `createProyecto` seeds 12 rows on insert (defaulting all months to the project's scalar `honorarios_cotizador`). The scalar is left untouched after subsequent edits — keep this in mind if a future view needs to read "current honorarios": prefer `proyecto_honorarios_mensuales` over `proyectos.honorarios_cotizador` when per-month accuracy matters.
 
 **Required UNIQUE constraints (for `upsert(... { onConflict })` calls)**:
 - `sueldos (bp_id, mes)` — used by `updateBPSueldosFullYear`, `createSueldo` w/ allMonths.
 - `asignaciones (proyecto_id, bp_id, mes)` — used by `updateAsignacionFullYear`.
 - `proyecto_honorarios_mensuales (proyecto_id, mes)` — used by `updateProjectHonorarioFullYear`.
+- `horas_contratadas (bp_id, mes)` — used by `updateBPCapacidadFullYear`.
 
 If any is missing, the first upsert returns a clear Postgres error in the toast (`there is no unique or exclusion constraint matching the ON CONFLICT specification`). Add the constraint; don't change to fetch-then-decide patterns unless there's a structural reason.
 
@@ -207,11 +220,103 @@ Trabajo de seguridad pausado a propósito. Retomar solo con foco, nunca cansado.
   `https://wkannvjtzycyyquhnncv.supabase.co/auth/v1/callback`. Email de admin
   vía `VITE_ADMIN_EMAIL`.
 
+## Plan: columna de año (ejecutar antes de diciembre 2026)
+
+Hoy no hay dimensión de año en ningún lado: `mes` es `int 1-12` y listo. Por eso
+`/api/export?year=` se acepta pero no filtra, "vista anual" significa "todos los
+meses cargados", y `previousMonth(1)` devuelve 12 en vez de diciembre del año
+anterior. Mientras haya un solo año de datos no molesta. **En enero de 2027 sí**:
+cargar 2027 sobre los mismos `mes` 1-12 mezcla los dos años en cada total.
+
+Está escrito para ejecutar sin volver a pensarlo. Orden obligatorio: los pasos 1
+y 2 son compatibles hacia atrás (la app vieja sigue andando), el 3 recién cuando
+todo lo demás está deployado.
+
+### Paso 1 — Esquema (una migración SQL)
+
+Las cuatro tablas con `mes` necesitan `anio` (sin ñ: evita problemas de encoding
+en PostgREST y en los scripts):
+
+- `asignaciones`, `sueldos`, `proyecto_honorarios_mensuales`, `horas_proyecto`,
+  y también **`horas_contratadas`** — se suele olvidar porque se agregó después,
+  pero tiene `mes` y por lo tanto el mismo problema.
+
+Para cada una:
+
+```sql
+alter table <tabla> add column if not exists anio int;
+update <tabla> set anio = 2026 where anio is null;   -- todo lo cargado es 2026
+alter table <tabla> alter column anio set not null;
+alter table <tabla> alter column anio set default extract(year from now());
+```
+
+Y rehacer los UNIQUE, que hoy no incluyen el año (si no, cargar enero 2027 pisa
+enero 2026 vía upsert — esta es la parte que rompe datos, no la que rompe el
+build):
+
+```sql
+alter table sueldos drop constraint if exists sueldos_bp_id_mes_key;
+alter table sueldos add constraint sueldos_bp_id_anio_mes_key unique (bp_id, anio, mes);
+-- idem: asignaciones (proyecto_id, bp_id, anio, mes),
+--       proyecto_honorarios_mensuales (proyecto_id, anio, mes),
+--       horas_proyecto (proyecto_id, anio, mes),
+--       horas_contratadas (bp_id, anio, mes)
+```
+
+Índice por `(anio, mes)` en `asignaciones` y `sueldos` — son las dos que más
+crecen.
+
+### Paso 2 — Queries (`src/lib/queries.ts`)
+
+- Agregar `anio: number` a los tipos `Asignacion`, `Sueldo`,
+  `ProyectoHonorarioMensual`, `ProyectoHorasMensual`, `HorasContratadas`.
+- `getDashboardSnapshot(mes)` → `getDashboardSnapshot(anio, mes)`;
+  `getAnnualSnapshot()` → `getAnnualSnapshot(anio)`. Filtrar con `.eq('anio', anio)`
+  en los seis fetchs.
+- Todos los `upsert` con `onConflict` pasan a incluir `anio` y a escribirlo en
+  las filas.
+- Los helpers full-year (`getBPSueldosFullYear`, `getBPCapacidadFullYear`,
+  `getProjectHonorarioFullYear`, `getProjectHorasFullYear`) toman `anio`.
+
+### Paso 3 — Cálculos y UI
+
+- `calculations.ts` casi no se toca: opera sobre arrays ya filtrados por año.
+  La excepción real es **`previousMonth`**, que hoy hace `1 → 12` dentro del
+  mismo año; con años pasa a devolver `{anio, mes}` y los llamadores (deltas de
+  sueldo) tienen que cruzar el límite de año.
+- `CURRENT_YEAR` está hardcodeado como `new Date().getFullYear()` en las dos
+  páginas de dashboard: pasa a ser estado, con un selector de año al lado del
+  `PeriodPicker`.
+- `INGRESO_YEAR` en los diálogos de BP (`fecha_ingreso` se arma como
+  `${INGRESO_YEAR}-MM-01`) tiene el mismo hardcodeo.
+- Reglas de negocio que hoy asumen un año único y hay que revisar una por una:
+  "vista anual = meses con al menos un BP asignado" y el capeo por
+  `fecha_ingreso` / `getMesEgreso`.
+
+### Paso 4 — `/api/export`
+
+- `?year=` pasa a filtrar de verdad. **Sin romper el contrato**: la estructura
+  `months: { "1".."12" }` se mantiene igual, sólo cambia qué año devuelve.
+  `meta.year_filtrado` pasa a `true` — dejarlo, es la señal que distingue una
+  respuesta filtrada de una del modelo viejo.
+- Default: año actual (ya es el comportamiento).
+- Avisar a quien consuma el endpoint antes de deployar este paso: hoy sin año
+  reciben todo; después reciben sólo el año pedido.
+
+### Verificación
+
+Con 2026 como único año cargado, el export de `?year=2026` tiene que dar
+**exactamente** el mismo JSON que antes de la migración (salvo
+`meta.year_filtrado`). Ese diff en cero es la prueba de que el backfill salió
+bien. Después cargar un mes de 2027 de prueba y confirmar que no aparece en
+`?year=2026`.
+
 ## En el horizonte
 
 - Completar RLS después de que OAuth esté estable y testeado.
 - Campo `horas_reales` junto a `horas_cotizadas` en Asignaciones, con métrica de
   "desvío de horas".
+- Columna de año: ver el plan detallado más arriba. Ejecutar antes de diciembre.
 - Riesgo de pausa del free tier de Supabase tras inactividad: mantener actividad
   o considerar upgrade.
 
