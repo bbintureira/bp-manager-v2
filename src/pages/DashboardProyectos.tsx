@@ -38,11 +38,19 @@ import {
   ListSkeleton,
   TableSkeleton,
 } from '@/components/ui/loading-states'
-import { MonthPicker, getMonthLabel } from '@/components/ui/month-picker'
 import { MultiSelect } from '@/components/ui/multi-select'
+import {
+  PeriodPicker,
+  mesPeriodo,
+  periodoLabel,
+  periodoMeses,
+  periodoPrimerMes,
+  type Periodo,
+} from '@/components/ui/period-picker'
 import { Section } from '@/components/ui/section'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge, type StatusVariant } from '@/components/ui/status-badge'
+import { Tabs } from '@/components/ui/tabs'
 import { ViewToggle, type ViewMode } from '@/components/ui/view-toggle'
 import {
   formatCompactCurrency,
@@ -57,6 +65,7 @@ import {
   summarizeAllProjects,
   summarizeAllProjectsRentabilidad,
   summarizeProjectsAnnual,
+  summarizeProjectsPeriod,
   type AggregatedRentabilidad,
   type ProjectAnnualSummary,
   type ProjectMonthSummary,
@@ -80,7 +89,7 @@ import { TOOLTIPS } from '@/constants/tooltips'
 // --------------------------------------------------------------------------
 
 const CURRENT_YEAR = new Date().getFullYear()
-const defaultMonth = () => new Date().getMonth() + 1
+const defaultPeriodo = (): Periodo => mesPeriodo(new Date().getMonth() + 1)
 
 const withInfo = (text: string, tip: string) => (
   <span className="inline-flex items-center gap-1">
@@ -113,10 +122,62 @@ function statusVariantFor(raw: string | null | undefined): {
   return { variant: 'active', label: 'Activo' }
 }
 
+/**
+ * Row shape the page renders, shared by every scope (mes / trimestre /
+ * año). Both `ProjectMonthSummary` and `ProjectAnnualSummary` normalize
+ * into this so the table, chart and KPIs have a single consumer type.
+ */
+interface ProjectViewRow {
+  proyecto: Proyecto
+  /** Distinct BPs with hours on the project in the scope. */
+  bps: number
+  totalHoras: number
+  revenue: number
+  cost: number
+  marginAbsolute: number
+  marginPercent: number
+  /** HC — hours sold commercially in the scope. */
+  horasCotizadas: number
+  /** HC − HA in hours. */
+  diffHorasComercial: number
+  /** The same difference valued at the project's per-hour rate. */
+  diffPlataComercial: number
+}
+
+function fromMonthSummary(s: ProjectMonthSummary): ProjectViewRow {
+  return {
+    proyecto: s.proyecto,
+    bps: s.bps,
+    totalHoras: s.totalHoras,
+    revenue: s.revenue,
+    cost: s.cost,
+    marginAbsolute: s.marginAbsolute,
+    marginPercent: s.marginPercent,
+    horasCotizadas: s.horasCotizadas,
+    diffHorasComercial: s.diffHorasComercial,
+    diffPlataComercial: s.diffPlataComercial,
+  }
+}
+
+function fromAnnualSummary(s: ProjectAnnualSummary): ProjectViewRow {
+  return {
+    proyecto: s.proyecto,
+    bps: s.uniqueBps,
+    totalHoras: s.totalHoras,
+    revenue: s.revenue,
+    cost: s.cost,
+    marginAbsolute: s.marginAbsolute,
+    marginPercent: s.marginPercent,
+    horasCotizadas: s.horasCotizadas,
+    diffHorasComercial: s.diffHorasComercial,
+    diffPlataComercial: s.diffPlataComercial,
+  }
+}
+
 interface MonthlyData {
   mode: 'monthly'
-  snapshot: DashboardSnapshot
-  projectSummaries: ProjectMonthSummary[]
+  snapshot: DashboardSnapshot | AnnualSnapshot
+  projectSummaries: ProjectViewRow[]
   rentabilidad: AggregatedRentabilidad
 }
 
@@ -125,15 +186,21 @@ interface AnnualData {
   snapshot: AnnualSnapshot
   /** Distinct projects with at least one asignacion in the year. */
   activeProjects: number
-  projects: ProjectAnnualSummary[]
+  projects: ProjectViewRow[]
   rentabilidad: AggregatedRentabilidad
 }
 
 type PageData = MonthlyData | AnnualData
 
-function deriveMonthly(snapshot: DashboardSnapshot, mes: number): MonthlyData {
-  // Rentabilidad uses month-scoped asignaciones to match the displayed mes.
-  const monthAsignaciones = snapshot.asignaciones.filter((a) => a.mes === mes)
+function deriveMonthly(
+  snapshot: DashboardSnapshot | AnnualSnapshot,
+  meses: number[]
+): MonthlyData {
+  // Rentabilidad uses scope-scoped asignaciones to match what's displayed.
+  const inScope = new Set(meses)
+  const monthAsignaciones = snapshot.asignaciones.filter((a) =>
+    inScope.has(Number(a.mes))
+  )
   const rentabilidad = aggregateRentabilidad(
     summarizeAllProjectsRentabilidad(
       snapshot.proyectos,
@@ -142,18 +209,32 @@ function deriveMonthly(snapshot: DashboardSnapshot, mes: number): MonthlyData {
       snapshot.sueldos
     )
   )
+  // A single month keeps the existing per-month path untouched; a quarter
+  // aggregates its three months (a Q equals the sum of its monthly views).
+  const projectSummaries =
+    meses.length === 1
+      ? summarizeAllProjects(
+          snapshot.proyectos,
+          snapshot.asignaciones,
+          snapshot.sueldos,
+          meses[0],
+          snapshot.brandPartners,
+          snapshot.honorariosMensuales,
+          snapshot.horasMensuales
+        ).map(fromMonthSummary)
+      : summarizeProjectsPeriod(
+          snapshot.proyectos,
+          snapshot.asignaciones,
+          snapshot.sueldos,
+          meses,
+          snapshot.brandPartners,
+          snapshot.honorariosMensuales,
+          snapshot.horasMensuales
+        ).map(fromAnnualSummary)
   return {
     mode: 'monthly',
     snapshot,
-    projectSummaries: summarizeAllProjects(
-      snapshot.proyectos,
-      snapshot.asignaciones,
-      snapshot.sueldos,
-      mes,
-      snapshot.brandPartners,
-      snapshot.honorariosMensuales,
-      snapshot.horasMensuales
-    ),
+    projectSummaries,
     rentabilidad,
   }
 }
@@ -181,16 +262,19 @@ function deriveAnnual(snapshot: AnnualSnapshot): AnnualData {
       snapshot.brandPartners,
       snapshot.honorariosMensuales,
       snapshot.horasMensuales
-    ),
+    ).map(fromAnnualSummary),
     rentabilidad,
   }
 }
 
 // --------------------------------------------------------------------------
 
+type ProyectosTab = 'rentabilidad' | 'comercial'
+
 export function DashboardProyectos() {
   const [viewMode, setViewMode] = useState<ViewMode>('annual')
-  const [mes, setMes] = useState<number>(defaultMonth)
+  const [periodo, setPeriodo] = useState<Periodo>(defaultPeriodo)
+  const [tab, setTab] = useState<ProyectosTab>('rentabilidad')
   const [data, setData] = useState<PageData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -217,7 +301,8 @@ export function DashboardProyectos() {
   const { query: searchQuery } = useSearch()
 
   const fetchData = useCallback(
-    async (mode: ViewMode, selectedMes: number) => {
+    async (mode: ViewMode, selected: Periodo) => {
+      const meses = periodoMeses(selected)
       setLoading(true)
       setError(null)
       try {
@@ -241,7 +326,13 @@ export function DashboardProyectos() {
           }
           setData(deriveAnnual(snap))
         } else {
-          const snap = await getDashboardSnapshot(selectedMes)
+          // A quarter spans three months and `getDashboardSnapshot` is
+          // single-month, so wider scopes pull the annual snapshot and
+          // filter client-side.
+          const snap =
+            meses.length === 1
+              ? await getDashboardSnapshot(meses[0])
+              : await getAnnualSnapshot()
           if (snap.proyectos[0]) {
             const p = snap.proyectos[0]
             const hon = snap.honorariosMensuales
@@ -251,12 +342,12 @@ export function DashboardProyectos() {
               .filter((h) => String(h.proyecto_id) === String(p.id))
               .sort((a, b) => a.mes - b.mes)
             console.log('[dashboard] monthly snapshot for', p.nombre, {
-              mes: selectedMes,
+              meses,
               honorarios: hon.map((r) => r.honorarios),
               horas: horas.map((r) => r.horas),
             })
           }
-          setData(deriveMonthly(snap, selectedMes))
+          setData(deriveMonthly(snap, meses))
         }
       } catch (e) {
         console.error('[dashboard] failed to load snapshot', e)
@@ -270,12 +361,12 @@ export function DashboardProyectos() {
   )
 
   useEffect(() => {
-    void fetchData(viewMode, mes)
-  }, [viewMode, mes, fetchData])
+    void fetchData(viewMode, periodo)
+  }, [viewMode, periodo, fetchData])
 
   const refetch = useCallback(
-    () => fetchData(viewMode, mes),
-    [fetchData, viewMode, mes]
+    () => fetchData(viewMode, periodo),
+    [fetchData, viewMode, periodo]
   )
 
   // Filter helpers shared across monthly + annual views.
@@ -350,6 +441,17 @@ export function DashboardProyectos() {
       })
   }, [data, passesFilters])
 
+  // Commercial difference is a PROJECT-level concept: hours sold vs hours
+  // assigned across all its BPs. Unlike the rentabilidad table, a project
+  // that sold hours and assigned none must stay visible — that's exactly
+  // the case this view exists for. Biggest gap first.
+  const comercialRows = useMemo(() => {
+    const rows = data?.mode === 'annual' ? annualActive : monthlyActive
+    return rows
+      .filter((r) => r.horasCotizadas > 0 || r.totalHoras > 0)
+      .sort((a, b) => b.diffHorasComercial - a.diffHorasComercial)
+  }, [data, monthlyActive, annualActive])
+
   // KPI totals: sum from the table rows so the headline numbers always
   // match what's visible below and follow the active search / tipo
   // filters. Cost uses the per-asignacion model (horas × sueldo[mes]/cap)
@@ -390,7 +492,7 @@ export function DashboardProyectos() {
     <div className="flex items-center flex-wrap gap-2">
       <ViewToggle value={viewMode} onChange={setViewMode} />
       {viewMode === 'monthly' && (
-        <MonthPicker value={mes} onChange={setMes} />
+        <PeriodPicker value={periodo} onChange={setPeriodo} />
       )}
       {/* Project-type filter — now driven by the new project types
           (Brand Boost / Building / Growth / Reset / Producciones), replacing
@@ -437,7 +539,7 @@ export function DashboardProyectos() {
         title="Rentabilidad de proyectos"
         subtitle={
           viewMode === 'monthly'
-            ? `Vista mensual · ${getMonthLabel(mes)} ${CURRENT_YEAR}`
+            ? `${periodoLabel(periodo)} ${CURRENT_YEAR}`
             : `Vista anual · ${CURRENT_YEAR}`
         }
         action={
@@ -527,7 +629,9 @@ export function DashboardProyectos() {
         open={detailingProyecto !== null}
         onOpenChange={(o) => !o && setDetailingProyecto(null)}
         proyecto={detailingProyecto}
-        mes={mes}
+        // The detail modal is month-scoped; a quarter opens on its first
+        // month (the modal navigates months on its own from there).
+        mes={periodoPrimerMes(periodo)}
         onEdit={(p) => {
           setDetailingProyecto(null)
           setEditingProyecto(p)
@@ -647,7 +751,7 @@ export function DashboardProyectos() {
       </div>
 
       {/* Chart + Top BPs (only in monthly mode; annual shows the wide table) */}
-      {data?.mode !== 'annual' && (
+      {data?.mode !== 'annual' && tab === 'rentabilidad' && (
         <div className="grid grid-cols-3 gap-5 mb-5">
           <div className="col-span-2">
             <Section title="Margen por proyecto" flush>
@@ -721,11 +825,25 @@ export function DashboardProyectos() {
         </div>
       )}
 
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        ariaLabel="Vista de proyectos"
+        items={[
+          { key: 'rentabilidad', label: 'Rentabilidad' },
+          { key: 'comercial', label: 'Diferencia comercial' },
+        ]}
+      />
+
       {/* Projects table */}
       <Section
-        title="Proyectos activos"
+        title={
+          tab === 'comercial'
+            ? `Diferencia comercial · ${comercialRows.length}`
+            : 'Proyectos activos'
+        }
         tabs={
-          loading || !data
+          loading || !data || tab === 'comercial'
             ? undefined
             : data.mode === 'monthly'
               ? [
@@ -747,18 +865,36 @@ export function DashboardProyectos() {
       >
         {loading || !data ? (
           <TableSkeleton />
+        ) : tab === 'comercial' ? (
+          comercialRows.length === 0 ? (
+            <EmptyState
+              message={
+                searchQuery || anyCategoriaFiltered
+                  ? 'Ningún proyecto coincide con los filtros.'
+                  : 'Sin horas contratadas ni asignadas en este período.'
+              }
+            />
+          ) : (
+            <DataTable
+              columns={comercialColumns()}
+              data={comercialRows}
+              rowKey={(r) => String(r.proyecto.id)}
+              onRowClick={(r) => setDetailingProyecto(r.proyecto)}
+              footer={comercialFooter(comercialRows)}
+            />
+          )
         ) : data.mode === 'monthly' ? (
           monthlyActive.length === 0 ? (
             <EmptyState
               message={
                 searchQuery || anyCategoriaFiltered
                   ? 'Ningún proyecto coincide con los filtros.'
-                  : 'No hay datos para este mes.'
+                  : 'No hay datos para este período.'
               }
             />
           ) : (
             <DataTable
-              columns={projectTableColumns<ProjectMonthSummary>(
+              columns={projectTableColumns<ProjectViewRow>(
                 setEditingProyecto,
                 setDeletingProyecto
               )}
@@ -777,7 +913,7 @@ export function DashboardProyectos() {
           />
         ) : (
           <DataTable
-            columns={projectTableColumns<ProjectAnnualSummary>(
+            columns={projectTableColumns<ProjectViewRow>(
               setEditingProyecto,
               setDeletingProyecto,
               setHonorariosProyecto,
@@ -953,6 +1089,91 @@ function projectTableColumns<T extends ProjectRowLike>(
   ]
 }
 
+// --------------------------------------------------------------------------
+// Diferencia comercial (project-level)
+// --------------------------------------------------------------------------
+
+/**
+ * Hours sold vs hours assigned, per project. The gap belongs to the
+ * project, not to any BP: 100h sold with 80h spread across two BPs leaves
+ * 20h nobody is covering.
+ */
+function comercialColumns(): DataTableColumn<ProjectViewRow>[] {
+  return [
+    {
+      key: 'proyecto',
+      header: 'Proyecto',
+      render: (_v, row) => (
+        <span className="font-medium whitespace-nowrap">
+          {row.proyecto.nombre}
+        </span>
+      ),
+    },
+    {
+      key: 'horasContratadas',
+      header: withInfo('Horas contratadas', TOOLTIPS.horasContratadasProyecto),
+      numeric: true,
+      render: (_v, row) => formatHours(Math.round(row.horasCotizadas)),
+    },
+    {
+      key: 'horasAsignadas',
+      header: withInfo('Horas asignadas', TOOLTIPS.horasAsignadasProyecto),
+      numeric: true,
+      render: (_v, row) => formatHours(Math.round(row.totalHoras)),
+    },
+    {
+      key: 'difHoras',
+      header: withInfo('Dif. en horas', TOOLTIPS.difHorasProyecto),
+      numeric: true,
+      render: (_v, row) => <SignedHoursCell value={row.diffHorasComercial} />,
+    },
+    {
+      key: 'difPlata',
+      header: withInfo('Dif. en $', TOOLTIPS.difPlataProyecto),
+      numeric: true,
+      render: (_v, row) => <SignedMoneyCell value={row.diffPlataComercial} />,
+    },
+  ]
+}
+
+function comercialFooter(rows: ProjectViewRow[]) {
+  const sum = (pick: (r: ProjectViewRow) => number) =>
+    rows.reduce((s, r) => s + pick(r), 0)
+  return {
+    proyecto: 'Totales',
+    horasContratadas: formatHours(Math.round(sum((r) => r.horasCotizadas))),
+    horasAsignadas: formatHours(Math.round(sum((r) => r.totalHoras))),
+    difHoras: <SignedHoursCell value={sum((r) => r.diffHorasComercial)} />,
+    difPlata: <SignedMoneyCell value={sum((r) => r.diffPlataComercial)} />,
+  }
+}
+
+/** Signed hours: green when there are hours sold and unassigned, red when
+ *  the project is over-assigned (more hours worked than sold). */
+function SignedHoursCell({ value }: { value: number }) {
+  const rounded = Math.round(value)
+  if (rounded === 0) return <span className="text-tertiary">—</span>
+  const color = rounded > 0 ? 'var(--success)' : 'var(--danger)'
+  return (
+    <span style={{ color }} className="font-mono font-medium tabular-nums">
+      {rounded > 0 ? '+' : '−'}
+      {formatHours(Math.abs(rounded))}
+    </span>
+  )
+}
+
+/** Signed currency with the same colour convention as `SignedHoursCell`. */
+function SignedMoneyCell({ value }: { value: number }) {
+  if (Math.round(value) === 0) return <span className="text-tertiary">—</span>
+  const color = value > 0 ? 'var(--success)' : 'var(--danger)'
+  return (
+    <span style={{ color }} className="font-mono font-medium tabular-nums">
+      {value > 0 ? '+' : '−'}
+      {formatCurrency(Math.abs(value), 0)}
+    </span>
+  )
+}
+
 /** Commercial difference (HC − HA): plata in green/red with the hours diff
  *  as a secondary line. Positive = over-quoted (agency saves), negative =
  *  under-quoted (agency loses). Independent of idle-capacity math. */
@@ -1007,7 +1228,7 @@ function ResultCell({ value }: { value: number }) {
 }
 
 
-function TopBpsList({ summaries }: { summaries: ProjectMonthSummary[] }) {
+function TopBpsList({ summaries }: { summaries: ProjectViewRow[] }) {
   const top = summaries.slice(0, 4)
   if (top.length === 0) {
     return <EmptyState message="Sin datos para este mes." />

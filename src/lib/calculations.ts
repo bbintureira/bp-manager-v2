@@ -571,6 +571,8 @@ export function summarizeProjectsAnnual(
     // Ingresos in sync with the annual KPI which uses the same rule.
     const months = byMonth.filter((m) => m.totalHoras > 0)
     const revenue = months.reduce((s, x) => s + x.revenue, 0)
+    // (kept inline instead of reusing `aggregateProjectMonths` so the
+    // annual numbers stay pinned to the `totalHoras > 0` rule)
     const cost = months.reduce((s, x) => s + x.cost, 0)
     const totalHoras = months.reduce((s, x) => s + x.totalHoras, 0)
     // Commercial difference (HC - HA) aggregated only over active months,
@@ -592,6 +594,88 @@ export function summarizeProjectsAnnual(
       (a) => same(a.proyecto_id, p.id)
     )
     const uniqueBps = new Set(ownAsignaciones.map((a) => String(a.bp_id))).size
+    const marginAbsolute = revenue - cost
+    const marginPercent = revenue > 0 ? (marginAbsolute / revenue) * 100 : 0
+    return {
+      proyecto: p,
+      revenue,
+      cost,
+      totalHoras,
+      uniqueBps,
+      avgUtilization,
+      marginAbsolute,
+      marginPercent,
+      horasCotizadas,
+      diffHorasComercial,
+      diffPlataComercial,
+      byMonth,
+    }
+  })
+}
+
+/**
+ * Same aggregate as `summarizeProjectsAnnual` but restricted to an
+ * arbitrary set of months — used by the quarterly (Q1..Q4) scope.
+ *
+ * A month counts when the project has assigned hours OR booked honorarios
+ * that month, so a quarter equals exactly the sum of the three monthly
+ * views (the annual variant is stricter — hours only — and is left
+ * untouched so its numbers don't move). That matters for the commercial
+ * difference: a project that sold hours and assigned none must still show
+ * up, it's the very case the view exists for.
+ *
+ * `byMonth` stays 12-long (index = mes - 1); months outside `meses` are
+ * present but never counted.
+ */
+export function summarizeProjectsPeriod(
+  proyectos: Proyecto[],
+  asignaciones: Asignacion[],
+  sueldos: Sueldo[],
+  meses: number[],
+  brandPartners?: BrandPartner[],
+  honorariosMensuales?: { proyecto_id: Id; mes: number; honorarios: number }[],
+  horasMensuales?: { proyecto_id: Id; mes: number; horas: number }[]
+): ProjectAnnualSummary[] {
+  const inScope = new Set(meses)
+  return proyectos.map((p) => {
+    const byMonth = MONTHS.map((m) =>
+      calculateProjectMargin(
+        p,
+        asignaciones,
+        sueldos,
+        m,
+        brandPartners,
+        honorariosMensuales,
+        horasMensuales
+      )
+    )
+    const months = byMonth.filter(
+      (m, i) => inScope.has(i + 1) && (m.totalHoras > 0 || m.revenue > 0)
+    )
+    const revenue = months.reduce((s, x) => s + x.revenue, 0)
+    const cost = months.reduce((s, x) => s + x.cost, 0)
+    const totalHoras = months.reduce((s, x) => s + x.totalHoras, 0)
+    const horasCotizadas = months.reduce((s, x) => s + x.horasCotizadas, 0)
+    const diffHorasComercial = months.reduce(
+      (s, x) => s + x.diffHorasComercial,
+      0
+    )
+    const diffPlataComercial = months.reduce(
+      (s, x) => s + x.diffPlataComercial,
+      0
+    )
+    const avgUtilization =
+      months.length === 0
+        ? 0
+        : months.reduce((s, x) => s + x.utilization, 0) / months.length
+    const uniqueBps = new Set(
+      asignaciones
+        .filter(
+          (a) =>
+            same(a.proyecto_id, p.id) && inScope.has(Number(a.mes)) && num(a.horas) > 0
+        )
+        .map((a) => String(a.bp_id))
+    ).size
     const marginAbsolute = revenue - cost
     const marginPercent = revenue > 0 ? (marginAbsolute / revenue) * 100 : 0
     return {
@@ -1136,9 +1220,17 @@ export interface BPHorasMonthRow {
   horasContratadas: number
   /** Σ horas asignadas in `mes`. */
   horasAsignadas: number
-  /** contratadas - asignadas (>=0; negative becomes 0 because over means we're "over" not "free"). */
+  /**
+   * contratadas - asignadas, SIGNED. A negative value means the BP is
+   * over-assigned (sold beyond capacity) — real information, so it is
+   * surfaced as-is instead of being clamped to 0.
+   */
   horasLibres: number
-  /** Idle cost in pesos: horasLibres × (sueldo[mes] / capacidad). What the
+  /** max(0, horasLibres) — idle capacity only. Over-assignment doesn't
+   *  create negative ociosidad, so the cost / annual idle aggregates use
+   *  this instead of the signed `horasLibres`. */
+  horasOciosas: number
+  /** Idle cost in pesos: horasOciosas × (sueldo[mes] / capacidad). What the
    *  agency pays for unassigned capacity this month. */
   costoHorasLibres: number
   /** asignadas / contratadas × 100 (0 if no capacity). */
@@ -1164,6 +1256,7 @@ export function bpHorasMonthRow(
       horasContratadas: 0,
       horasAsignadas: 0,
       horasLibres: 0,
+      horasOciosas: 0,
       costoHorasLibres: 0,
       ocupacion: 0,
       byProject: [],
@@ -1179,9 +1272,12 @@ export function bpHorasMonthRow(
     (a) => a.mes === mes && same(a.bp_id, bp.id)
   )
   const horasAsignadas = own.reduce((s, a) => s + num(a.horas), 0)
-  const horasLibres = Math.max(0, horasContratadas - horasAsignadas)
+  // Signed: over-assignment shows as a negative "libres" in the table.
+  const horasLibres = horasContratadas - horasAsignadas
+  const horasOciosas = Math.max(0, horasLibres)
   // Value the idle hours at the BP's hourly cost (sueldo[mes] / capacidad).
-  const costoHorasLibres = horasLibres * valorHoraBPForMonth(bp, sueldos, mes)
+  // Uses the clamped value — being over-assigned costs nothing extra.
+  const costoHorasLibres = horasOciosas * valorHoraBPForMonth(bp, sueldos, mes)
   const ocupacion =
     horasContratadas > 0 ? (horasAsignadas / horasContratadas) * 100 : 0
 
@@ -1210,6 +1306,66 @@ export function bpHorasMonthRow(
     horasContratadas,
     horasAsignadas,
     horasLibres,
+    horasOciosas,
+    costoHorasLibres,
+    ocupacion,
+    byProject,
+  }
+}
+
+/**
+ * Aggregates `bpHorasMonthRow` over an arbitrary set of months — the
+ * building block for the quarterly (Q1..Q4) scope. Returns the same shape
+ * as a single-month row so the tables render either scope unchanged.
+ *
+ * Only months where the BP actually has assigned hours contribute
+ * capacity, mirroring the annual rule: never project contracted hours
+ * into months with no data. With a single mes this is equivalent to
+ * `bpHorasMonthRow` for every row the tables actually display (they all
+ * filter on `horasAsignadas > 0`).
+ */
+export function bpHorasPeriodRow(
+  bp: BrandPartner,
+  asignaciones: Asignacion[],
+  proyectos: Proyecto[],
+  meses: number[],
+  sueldos: Sueldo[] = []
+): BPHorasMonthRow {
+  const rows = meses.map((m) =>
+    bpHorasMonthRow(bp, asignaciones, proyectos, m, sueldos)
+  )
+  const active = rows.filter((r) => r.horasAsignadas > 0)
+  const horasContratadas = active.reduce((s, r) => s + r.horasContratadas, 0)
+  const horasAsignadas = active.reduce((s, r) => s + r.horasAsignadas, 0)
+  // Signed net across the period, so an over-assigned month offsets an
+  // idle one — that IS the commercial reading of "libres" for a quarter.
+  const horasLibres = horasContratadas - horasAsignadas
+  // Ociosidad never nets: idle hours in one month stay sellable even if
+  // another month was over-assigned.
+  const horasOciosas = active.reduce((s, r) => s + r.horasOciosas, 0)
+  const costoHorasLibres = active.reduce((s, r) => s + r.costoHorasLibres, 0)
+  const ocupacion =
+    horasContratadas > 0 ? (horasAsignadas / horasContratadas) * 100 : 0
+
+  const byProjMap = new Map<string, BPProjectHorasRow>()
+  for (const r of active) {
+    for (const p of r.byProject) {
+      const key = String(p.proyecto_id)
+      const prev = byProjMap.get(key)
+      if (prev) prev.horas += p.horas
+      else byProjMap.set(key, { ...p })
+    }
+  }
+  const byProject = Array.from(byProjMap.values()).sort(
+    (a, b) => b.horas - a.horas
+  )
+
+  return {
+    bp,
+    horasContratadas,
+    horasAsignadas,
+    horasLibres,
+    horasOciosas,
     costoHorasLibres,
     ocupacion,
     byProject,
@@ -1257,9 +1413,13 @@ export interface BPRentabilidadMonthRow {
   sueldoMensual: number
   /** Σ ingreso across projects this BP touched in `mes`. */
   ingresoCotizado: number
-  /** Σ costo (valor/h BP × horas) across projects in `mes`. */
+  /** Σ costo (valor/h BP × horas) across projects in `mes`. Vicky's
+   *  "sueldo ocupado": what the hours actually assigned cost. */
   costo: number
-  /** ingreso - costo. */
+  /** "Sueldo ocioso" = sueldoMensual − costo. The slice of the salary not
+   *  backed by assigned hours. Negative when the BP is over-assigned. */
+  sueldoOcioso: number
+  /** ingreso - costo. Vicky's "diferencia cubierto vs ocupado". */
   margen: number
   /** margen / ingreso × 100 (0 if no ingreso). */
   margenPercent: number
@@ -1294,6 +1454,7 @@ export function bpRentabilidadMonthRow(
       sueldoMensual: 0,
       ingresoCotizado: 0,
       costo: 0,
+      sueldoOcioso: 0,
       margen: 0,
       margenPercent: 0,
       coberturaSalarial: 0,
@@ -1393,12 +1554,101 @@ export function bpRentabilidadMonthRow(
   // agency is absorbing the difference. Compares ingreso vs. sueldo —
   // NOT costo vs. sueldo (that would measure utilization, not coverage).
   const coberturaSalarial = ingresoCotizado - sueldoMensual
+  // Sueldo ocioso: the part of the salary the assigned hours don't consume.
+  const sueldoOcioso = sueldoMensual - costo
 
   return {
     bp,
     sueldoMensual,
     ingresoCotizado,
     costo,
+    sueldoOcioso,
+    margen,
+    margenPercent,
+    coberturaSalarial,
+    diferenciaComercialHoras,
+    diferenciaComercial,
+    byProject,
+  }
+}
+
+/**
+ * Aggregates `bpRentabilidadMonthRow` over an arbitrary set of months —
+ * the building block for the quarterly (Q1..Q4) scope. Same shape as a
+ * single-month row so the tables render either scope unchanged.
+ *
+ * Sueldo is only summed over months where the BP actually has projects
+ * assigned, matching the annual aggregate: months with no activity would
+ * otherwise inflate the salary while the ingreso stays at 0.
+ */
+export function bpRentabilidadPeriodRow(
+  bp: BrandPartner,
+  asignaciones: Asignacion[],
+  sueldos: Sueldo[],
+  proyectos: Proyecto[],
+  honorariosMensuales: { proyecto_id: Id; mes: number; honorarios: number }[],
+  meses: number[],
+  horasMensuales: { proyecto_id: Id; mes: number; horas: number }[] = []
+): BPRentabilidadMonthRow {
+  const rows = meses.map((m) =>
+    bpRentabilidadMonthRow(
+      bp,
+      asignaciones,
+      sueldos,
+      proyectos,
+      honorariosMensuales,
+      m,
+      horasMensuales
+    )
+  )
+  const active = rows.filter((r) => r.byProject.length > 0)
+  const sueldoMensual = active.reduce((s, r) => s + r.sueldoMensual, 0)
+  const ingresoCotizado = active.reduce((s, r) => s + r.ingresoCotizado, 0)
+  const costo = active.reduce((s, r) => s + r.costo, 0)
+  const margen = ingresoCotizado - costo
+  const margenPercent =
+    ingresoCotizado > 0 ? (margen / ingresoCotizado) * 100 : 0
+  const coberturaSalarial = ingresoCotizado - sueldoMensual
+  const sueldoOcioso = sueldoMensual - costo
+  const diferenciaComercialHoras = active.reduce(
+    (s, r) => s + r.diferenciaComercialHoras,
+    0
+  )
+  const diferenciaComercial = active.reduce(
+    (s, r) => s + r.diferenciaComercial,
+    0
+  )
+
+  const byProjMap = new Map<string, BPProjectRentabilidadRow>()
+  for (const r of active) {
+    for (const p of r.byProject) {
+      const key = String(p.proyecto_id)
+      const prev = byProjMap.get(key)
+      if (!prev) {
+        byProjMap.set(key, { ...p })
+        continue
+      }
+      prev.horas += p.horas
+      prev.ingreso += p.ingreso
+      prev.costo += p.costo
+      prev.margen += p.margen
+      // Rates become hour-weighted averages across the period.
+      prev.valorHoraProyecto =
+        prev.horas > 0 ? prev.ingreso / prev.horas : prev.valorHoraProyecto
+      prev.valorHoraBP =
+        prev.horas > 0 ? prev.costo / prev.horas : prev.valorHoraBP
+    }
+  }
+  const byProject = Array.from(byProjMap.values()).sort(
+    (a, b) => b.margen - a.margen
+  )
+
+  return {
+    bp,
+    sueldoMensual,
+    ingresoCotizado,
+    costo,
+    sueldoOcioso,
     margen,
     margenPercent,
     coberturaSalarial,
@@ -1502,7 +1752,7 @@ export function bpHorasAnnualAggregate(
   let costoHorasLibres = 0
   for (const m of monthsWithAsig) {
     const row = year.byMonth[m - 1]
-    totalLibres += row?.horasLibres ?? 0
+    totalLibres += row?.horasOciosas ?? 0
     costoHorasLibres += row?.costoHorasLibres ?? 0
   }
   const ocupacionPromedio =
@@ -1536,6 +1786,8 @@ export interface BPRentabilidadAnnualAggregate {
   totalSueldo: number
   /** totalIngreso − totalSueldo. */
   totalCoberturaSalarial: number
+  /** totalSueldo − totalCosto ("sueldo ocioso" del año). */
+  totalSueldoOcioso: number
   /** Σ diferenciaComercialHoras across the 12 months. */
   totalDiferenciaComercialHoras: number
   /** Σ diferenciaComercial (en plata) across the 12 months. */
@@ -1610,6 +1862,7 @@ export function bpRentabilidadAnnualAggregate(
     sueldoPromedio,
     totalSueldo,
     totalCoberturaSalarial,
+    totalSueldoOcioso: totalSueldo - totalCosto,
     totalDiferenciaComercialHoras,
     totalDiferenciaComercial,
     byMonth: year.byMonth.map((m) => m.margen),
