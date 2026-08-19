@@ -71,6 +71,32 @@ Two files, sharply separated:
 
 Two private helpers used everywhere: `same(a, b) = String(a) === String(b)` and `num(v)` (coerce-or-zero, never NaN).
 
+### Endpoint de export (`/api/export`)
+
+Puerta para máquinas: función serverless de Vercel (`api/export.ts`) que
+devuelve TODO el dataset en JSON de solo lectura, para que los scripts del P&L
+y los dashboards consuman sin tocar la UI ni el Excel.
+
+- Auth: `Authorization: Bearer <EXPORT_TOKEN>` (env var en Vercel). Nunca por
+  query param — quedaría en los logs de acceso. Sin token válido → 401.
+- Lee Supabase por REST con `fetch` paginado de a 1000 filas (PostgREST capa
+  los selects planos en 1000 y `asignaciones` se pasa de largo). No usa
+  `src/lib/supabase.ts`: ese módulo depende de `import.meta.env` y explota
+  fuera de Vite.
+- **Reutiliza `src/lib/calculations.ts`** (`bpHorasMonthRow`,
+  `bpRentabilidadMonthRow`, `summarizeAllProjects`) — la fidelidad con la UI es
+  estructural, no reimplementada. Se puede importar porque calculations.ts sólo
+  hace `import type` de queries.ts, y eso se borra en compilación.
+- Reglas de inclusión, alineadas con las tablas: un BP entra en el mes si tiene
+  horas asignadas **o** una fila de sueldo cargada (incluye inactivos, con flag
+  `activo`); un proyecto entra si tiene horas asignadas **o** honorarios
+  cargados. El bloque `totales` suma sólo los BPs con asignaciones — así
+  coincide con los KPIs de la pestaña Rentabilidad con filtro "Todos".
+- `?year=` se acepta y se devuelve, pero **no filtra**: el esquema no tiene
+  dimensión de año (ver "Schema invariants"). La respuesta lo aclara en `meta`.
+- `vercel.json` excluye `/api/` del rewrite SPA (`/((?!api/).*)`), y
+  `tsconfig.json` incluye `api` para que `npm run build` lo tipee.
+
 ### Pages & layout
 
 Each page returns `<AppLayout breadcrumb={…} topbarActions={…}>{...}</AppLayout>`. `AppLayout` renders `<Sidebar />` (sticky 100vh) + `<Topbar />` + a `<main>` slot. Don't pass `activeNav` — `<Sidebar>` derives the active nav item from `useLocation()` via `<NavLink>`.
