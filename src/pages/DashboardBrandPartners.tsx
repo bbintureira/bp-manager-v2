@@ -17,9 +17,18 @@ import {
   KpiSkeletonGrid,
   TableSkeleton,
 } from '@/components/ui/loading-states'
-import { MonthPicker, getMonthLabel } from '@/components/ui/month-picker'
+import { getMonthLabel } from '@/components/ui/month-picker'
+import {
+  PeriodPicker,
+  mesPeriodo,
+  periodoLabel,
+  periodoMeses,
+  periodoPrimerMes,
+  type Periodo,
+} from '@/components/ui/period-picker'
 import { Section } from '@/components/ui/section'
 import { Select } from '@/components/ui/select'
+import { Tabs } from '@/components/ui/tabs'
 import { ViewToggle, type ViewMode } from '@/components/ui/view-toggle'
 import {
   formatCompactCurrency,
@@ -31,9 +40,9 @@ import {
 } from '@/lib/format'
 import {
   bpHorasAnnualAggregate,
-  bpHorasMonthRow,
+  bpHorasPeriodRow,
   bpRentabilidadAnnualAggregate,
-  bpRentabilidadMonthRow,
+  bpRentabilidadPeriodRow,
   bpRentabilidadYear,
   getMesIngreso,
   type BPHorasAnnualAggregate,
@@ -63,7 +72,7 @@ import { InfoTooltip } from '@/components/ui/InfoTooltip'
 import { TOOLTIPS } from '@/constants/tooltips'
 
 const CURRENT_YEAR = new Date().getFullYear()
-const defaultMonth = () => new Date().getMonth() + 1
+const defaultPeriodo = (): Periodo => mesPeriodo(new Date().getMonth() + 1)
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1)
 
 const withInfo = (text: string, tip: string) => (
@@ -78,7 +87,7 @@ type TabKey = 'horas' | 'rentabilidad'
 export function DashboardBrandPartners() {
   const [tab, setTab] = useState<TabKey>('horas')
   const [view, setView] = useState<ViewMode>('monthly')
-  const [mes, setMes] = useState<number>(defaultMonth)
+  const [periodo, setPeriodo] = useState<Periodo>(defaultPeriodo)
   const [snapshot, setSnapshot] = useState<
     DashboardSnapshot | AnnualSnapshot | null
   >(null)
@@ -97,14 +106,17 @@ export function DashboardBrandPartners() {
   const { query: searchQuery } = useSearch()
 
   const fetchData = useCallback(
-    async (mode: ViewMode, selectedMes: number) => {
+    async (mode: ViewMode, selected: Periodo) => {
       setLoading(true)
       setError(null)
       try {
+        // A quarter needs three months of asignaciones / sueldos, and
+        // `getDashboardSnapshot` is single-month — so anything wider than
+        // one month pulls the annual snapshot and filters client-side.
         const snap =
-          mode === 'annual'
+          mode === 'annual' || selected.kind === 'trimestre'
             ? await getAnnualSnapshot()
-            : await getDashboardSnapshot(selectedMes)
+            : await getDashboardSnapshot(selected.mes)
         setSnapshot(snap)
       } catch (e) {
         console.error('[bp-dashboard] failed', e)
@@ -118,43 +130,48 @@ export function DashboardBrandPartners() {
   )
 
   useEffect(() => {
-    void fetchData(view, mes)
-  }, [view, mes, fetchData])
+    void fetchData(view, periodo)
+  }, [view, periodo, fetchData])
 
   const refetch = useCallback(
-    () => fetchData(view, mes),
-    [fetchData, view, mes]
+    () => fetchData(view, periodo),
+    [fetchData, view, periodo]
   )
+
+  const meses = useMemo(() => periodoMeses(periodo), [periodo])
+  const scopeMeta = periodo.kind === 'trimestre' ? 'del trimestre' : 'del mes'
 
   // Build per-tab rows once. Both tabs filter on the same set of BPs but
   // each tab needs different per-BP fields, so we compute both arrays.
+  // The period aggregators cover both scopes: with a single mes they
+  // return exactly the month row, with a quarter they sum its months.
   const allHorasRows: BPHorasMonthRow[] = useMemo(() => {
     if (!snapshot || view !== 'monthly') return []
     return snapshot.brandPartners.map((bp) =>
-      bpHorasMonthRow(
+      bpHorasPeriodRow(
         bp,
         snapshot.asignaciones,
         snapshot.proyectos,
-        mes,
+        meses,
         snapshot.sueldos
       )
     )
-  }, [snapshot, mes, view])
+  }, [snapshot, meses, view])
 
   const allRentabilidadRows: BPRentabilidadMonthRow[] = useMemo(() => {
     if (!snapshot || view !== 'monthly') return []
     return snapshot.brandPartners.map((bp) =>
-      bpRentabilidadMonthRow(
+      bpRentabilidadPeriodRow(
         bp,
         snapshot.asignaciones,
         snapshot.sueldos,
         snapshot.proyectos,
         snapshot.honorariosMensuales,
-        mes,
+        meses,
         snapshot.horasMensuales
       )
     )
-  }, [snapshot, mes, view])
+  }, [snapshot, meses, view])
 
   const allHorasAnnual: BPHorasAnnualAggregate[] = useMemo(() => {
     if (!snapshot || view !== 'annual') return []
@@ -287,7 +304,9 @@ export function DashboardBrandPartners() {
         (s, r) => s + r.horasAsignadas,
         0
       )
-      const totalLibres = filteredHoras.reduce((s, r) => s + r.horasLibres, 0)
+      // Idle KPI uses the clamped value: over-assignment in one BP must
+      // not cancel out real idle capacity in another.
+      const totalLibres = filteredHoras.reduce((s, r) => s + r.horasOciosas, 0)
       const totalCostoLibres = filteredHoras.reduce(
         (s, r) => s + r.costoHorasLibres,
         0
@@ -342,7 +361,9 @@ export function DashboardBrandPartners() {
   const topbarActions = (
     <div className="flex items-center gap-2">
       <ViewToggle value={view} onChange={setView} />
-      {view === 'monthly' && <MonthPicker value={mes} onChange={setMes} />}
+      {view === 'monthly' && (
+        <PeriodPicker value={periodo} onChange={setPeriodo} />
+      )}
       <Select
         aria-label="Filtrar por estado"
         value={activoFilter}
@@ -394,7 +415,9 @@ export function DashboardBrandPartners() {
       <PageHeader
         title="Brand Partners"
         subtitle={`${
-          view === 'monthly' ? `${getMonthLabel(mes)} ${CURRENT_YEAR}` : `Año ${CURRENT_YEAR}`
+          view === 'monthly'
+            ? `${periodoLabel(periodo)} ${CURRENT_YEAR}`
+            : `Año ${CURRENT_YEAR}`
         } · ${tab === 'horas' ? 'Utilización de horas' : 'Rentabilidad en pesos'}`}
         action={
           <div className="flex items-center gap-2">
@@ -463,7 +486,9 @@ export function DashboardBrandPartners() {
         onOpenChange={(o) => !o && setDetailing(null)}
         bp={detailing}
         activeTab={tab}
-        mes={mes}
+        // The detail modal is month-scoped; a quarter opens on its first
+        // month (the modal has its own month navigation from there).
+        mes={periodoPrimerMes(periodo)}
         onEdit={(bp) => {
           setDetailing(null)
           setEditing(bp)
@@ -517,13 +542,13 @@ export function DashboardBrandPartners() {
             <KpiCard
               label={withInfo('% ocupación promedio', TOOLTIPS.ocupacionPromedio)}
               value={formatPercent(kpiStats.ocupacion)}
-              meta="del mes"
+              meta={scopeMeta}
             />
             <KpiCard
               label={withInfo('Horas libres totales', TOOLTIPS.horasLibresTotales)}
               value={formatCompactHours(Math.round(kpiStats.totalLibres))}
               fullValue={formatHours(Math.round(kpiStats.totalLibres))}
-              meta="del mes"
+              meta={scopeMeta}
             />
             <KpiCard
               label={withInfo('Costo libres total', TOOLTIPS.costoHorasLibresColumna)}
@@ -533,7 +558,7 @@ export function DashboardBrandPartners() {
                 </span>
               }
               fullValue={formatCurrency(kpiStats.totalCostoLibres)}
-              meta="ociosidad del mes"
+              meta={`ociosidad ${scopeMeta}`}
             />
           </>
         ) : kpiStats.kind === 'año' ? (
@@ -570,7 +595,7 @@ export function DashboardBrandPartners() {
               label={withInfo('Margen total', TOOLTIPS.margenTotal)}
               value={formatCompactCurrency(kpiStats.totalMargen)}
               fullValue={formatCurrency(kpiStats.totalMargen)}
-              meta="del mes"
+              meta={scopeMeta}
             />
             <KpiCard
               label={withInfo('Cobertura salarial total', TOOLTIPS.coberturaSalarialTotal)}
@@ -607,7 +632,15 @@ export function DashboardBrandPartners() {
         )}
       </div>
 
-      <Tabs value={tab} onChange={setTab} />
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        ariaLabel="Vista de Brand Partners"
+        items={[
+          { key: 'horas', label: 'Horas' },
+          { key: 'rentabilidad', label: 'Rentabilidad' },
+        ]}
+      />
 
       <Section title={`BPs · ${filteredCount}`} flush>
         {loading || !snapshot ? (
@@ -618,7 +651,7 @@ export function DashboardBrandPartners() {
               searchQuery
                 ? 'Ningún BP coincide con la búsqueda.'
                 : view === 'monthly'
-                  ? 'No hay datos para este mes.'
+                  ? 'No hay datos para este período.'
                   : 'Sin BPs cargados.'
             }
           />
@@ -635,23 +668,7 @@ export function DashboardBrandPartners() {
             data={filteredRentabilidad}
             rowKey={(r) => String(r.bp.id)}
             onRowClick={(r) => setDetailing(r.bp)}
-            footer={{
-              nombre: 'Totales',
-              margen: (() => {
-                const t = filteredRentabilidad.reduce(
-                  (s, r) => s + r.margen,
-                  0
-                )
-                return <MargenCell value={t} />
-              })(),
-              coberturaSalarial: (() => {
-                const t = filteredRentabilidad.reduce(
-                  (s, r) => s + r.coberturaSalarial,
-                  0
-                )
-                return <MargenCell value={t} />
-              })(),
-            }}
+            footer={rentabilidadFooter(filteredRentabilidad)}
           />
         ) : tab === 'horas' ? (
           <DataTable
@@ -670,23 +687,7 @@ export function DashboardBrandPartners() {
             data={filteredRentabilidadAnnual}
             rowKey={(r) => String(r.bp.id)}
             onRowClick={(r) => setDetailing(r.bp)}
-            footer={{
-              nombre: 'Totales',
-              totalMargen: (() => {
-                const t = filteredRentabilidadAnnual.reduce(
-                  (s, r) => s + r.totalMargen,
-                  0
-                )
-                return <MargenCell value={t} />
-              })(),
-              coberturaSalarial: (() => {
-                const t = filteredRentabilidadAnnual.reduce(
-                  (s, r) => s + r.totalCoberturaSalarial,
-                  0
-                )
-                return <MargenCell value={t} />
-              })(),
-            }}
+            footer={rentabilidadAnnualFooter(filteredRentabilidadAnnual)}
           />
         )}
       </Section>
@@ -695,34 +696,6 @@ export function DashboardBrandPartners() {
 }
 
 // --------------------------------------------------------------------------
-
-function Tabs({ value, onChange }: { value: TabKey; onChange: (t: TabKey) => void }) {
-  const items: { key: TabKey; label: string }[] = [
-    { key: 'horas', label: 'Horas' },
-    { key: 'rentabilidad', label: 'Rentabilidad' },
-  ]
-  return (
-    <div role="tablist" className="flex items-center gap-1 mb-4 border-b border-border">
-      {items.map((it) => (
-        <button
-          key={it.key}
-          role="tab"
-          type="button"
-          aria-selected={value === it.key}
-          onClick={() => onChange(it.key)}
-          className={cn(
-            'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-            value === it.key
-              ? 'border-accent text-accent'
-              : 'border-transparent text-secondary hover:text-primary'
-          )}
-        >
-          {it.label}
-        </button>
-      ))}
-    </div>
-  )
-}
 
 function InactivoPill() {
   return (
@@ -817,6 +790,40 @@ function ComercialDiffCell({ horas, plata }: { horas: number; plata: number }) {
   )
 }
 
+/** Horas libres (contratadas − asignadas). Negative = over-assigned, shown
+ *  in red with an explicit minus so it reads as "sobrevendido". */
+function LibresCell({ horas }: { horas: number }) {
+  const rounded = Math.round(horas)
+  return (
+    <span
+      className={cn(
+        'font-mono tabular-nums',
+        rounded < 0 && 'text-danger font-medium'
+      )}
+    >
+      {rounded < 0 ? '−' : ''}
+      {formatHours(Math.abs(rounded))}
+    </span>
+  )
+}
+
+/** Signed currency, red when negative. Used for the sueldo ocioso column. */
+function OciosoCell({ value }: { value: number }) {
+  const rounded = Math.round(value)
+  if (rounded === 0) return <span className="text-tertiary">—</span>
+  return (
+    <span
+      className={cn(
+        'font-mono tabular-nums font-medium',
+        rounded > 0 ? 'text-warning' : 'text-danger'
+      )}
+    >
+      {rounded < 0 ? '−' : ''}
+      {formatCurrency(Math.abs(value))}
+    </span>
+  )
+}
+
 /** Tints margen red/green. */
 function MargenCell({ value, percent }: { value: number; percent?: number }) {
   const tone = value < 0 ? 'text-danger' : value > 0 ? 'text-success' : 'text-tertiary'
@@ -869,7 +876,9 @@ function horasColumns(
       key: 'horasLibres',
       header: withInfo('Libres', TOOLTIPS.horasLibresColumna),
       numeric: true,
-      render: (_v, row) => formatHours(Math.round(row.horasLibres)),
+      // Signed: a negative value means the BP is over-assigned (sold
+      // beyond capacity) — that's information, not a zero.
+      render: (_v, row) => <LibresCell horas={row.horasLibres} />,
     },
     {
       key: 'costoHorasLibres',
@@ -920,6 +929,8 @@ function rentabilidadColumns(
         </span>
       ),
     },
+    // The six standardized metrics per BP, in the order Vicky asked for.
+    // Formulas are the pre-existing ones — only `sueldoOcioso` is new.
     {
       key: 'sueldoMensual',
       header: 'Sueldo',
@@ -929,14 +940,23 @@ function rentabilidadColumns(
     },
     {
       key: 'ingresoCotizado',
-      header: withInfo('Ingreso cotizado', TOOLTIPS.ingresoCotizado),
+      header: withInfo(
+        'Sueldo cubierto comercialmente',
+        TOOLTIPS.sueldoCubiertoComercialmente
+      ),
       numeric: true,
       render: (_v, row) =>
         row.ingresoCotizado > 0 ? formatCurrency(row.ingresoCotizado) : '—',
     },
     {
+      key: 'costo',
+      header: withInfo('Sueldo ocupado', TOOLTIPS.sueldoOcupado),
+      numeric: true,
+      render: (_v, row) => (row.costo > 0 ? formatCurrency(row.costo) : '—'),
+    },
+    {
       key: 'margen',
-      header: withInfo('Margen', TOOLTIPS.margenColumna),
+      header: withInfo('Dif. cubierto vs ocupado', TOOLTIPS.difCubiertoOcupado),
       numeric: true,
       render: (_v, row) =>
         row.ingresoCotizado > 0 ? (
@@ -945,6 +965,30 @@ function rentabilidadColumns(
           <span className="text-tertiary">—</span>
         ),
     },
+    {
+      key: 'sueldoOcioso',
+      header: withInfo('Sueldo ocioso', TOOLTIPS.sueldoOcioso),
+      numeric: true,
+      render: (_v, row) =>
+        row.sueldoMensual > 0 ? (
+          <OciosoCell value={row.sueldoOcioso} />
+        ) : (
+          <span className="text-tertiary">—</span>
+        ),
+    },
+    {
+      key: 'coberturaSalarial',
+      header: withInfo('Cobertura', TOOLTIPS.coberturaSalarialColumna),
+      numeric: true,
+      render: (_v, row) =>
+        row.sueldoMensual > 0 ? (
+          <MargenCell value={row.coberturaSalarial} />
+        ) : (
+          <span className="text-tertiary">—</span>
+        ),
+    },
+    // Kept as a secondary reference — the project-level view is now the
+    // primary home of the commercial difference.
     {
       key: 'diferenciaComercial',
       header: withInfo('Dif. comercial', TOOLTIPS.diferenciaComercialColumna),
@@ -960,17 +1004,6 @@ function rentabilidadColumns(
         ),
     },
     {
-      key: 'coberturaSalarial',
-      header: withInfo('Cobertura salarial', TOOLTIPS.coberturaSalarialColumna),
-      numeric: true,
-      render: (_v, row) =>
-        row.sueldoMensual > 0 ? (
-          <MargenCell value={row.coberturaSalarial} />
-        ) : (
-          <span className="text-tertiary">—</span>
-        ),
-    },
-    {
       key: 'acciones',
       header: '',
       render: (_v, row) => (
@@ -981,6 +1014,54 @@ function rentabilidadColumns(
       ),
     },
   ]
+}
+
+/** Totals row for the Rentabilidad table — one entry per numeric column,
+ *  keys must match the column keys above. */
+function rentabilidadFooter(rows: BPRentabilidadMonthRow[]) {
+  const sum = (pick: (r: BPRentabilidadMonthRow) => number) =>
+    rows.reduce((s, r) => s + pick(r), 0)
+  const ingreso = sum((r) => r.ingresoCotizado)
+  const costo = sum((r) => r.costo)
+  return {
+    nombre: 'Totales',
+    sueldoMensual: formatCurrency(sum((r) => r.sueldoMensual)),
+    ingresoCotizado: formatCurrency(ingreso),
+    costo: formatCurrency(costo),
+    margen: <MargenCell value={ingreso - costo} />,
+    sueldoOcioso: <OciosoCell value={sum((r) => r.sueldoOcioso)} />,
+    coberturaSalarial: <MargenCell value={sum((r) => r.coberturaSalarial)} />,
+    diferenciaComercial: (
+      <ComercialDiffCell
+        horas={sum((r) => r.diferenciaComercialHoras)}
+        plata={sum((r) => r.diferenciaComercial)}
+      />
+    ),
+  }
+}
+
+function rentabilidadAnnualFooter(rows: BPRentabilidadAnnualAggregate[]) {
+  const sum = (pick: (r: BPRentabilidadAnnualAggregate) => number) =>
+    rows.reduce((s, r) => s + pick(r), 0)
+  const ingreso = sum((r) => r.totalIngreso)
+  const costo = sum((r) => r.totalCosto)
+  return {
+    nombre: 'Totales',
+    totalSueldo: formatCurrency(sum((r) => r.totalSueldo)),
+    totalIngreso: formatCurrency(ingreso),
+    totalCosto: formatCurrency(costo),
+    totalMargen: <MargenCell value={ingreso - costo} />,
+    totalSueldoOcioso: <OciosoCell value={sum((r) => r.totalSueldoOcioso)} />,
+    coberturaSalarial: (
+      <MargenCell value={sum((r) => r.totalCoberturaSalarial)} />
+    ),
+    diferenciaComercial: (
+      <ComercialDiffCell
+        horas={sum((r) => r.totalDiferenciaComercialHoras)}
+        plata={sum((r) => r.totalDiferenciaComercial)}
+      />
+    ),
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -1103,27 +1184,61 @@ function rentabilidadAnnualColumns(
         </span>
       ),
     },
+    // Same six metrics as the monthly table, aggregated over the months
+    // the BP actually had assignments.
     {
-      key: 'sueldoPromedio',
-      header: 'Sueldo prom.',
+      key: 'totalSueldo',
+      header: 'Sueldo año',
       numeric: true,
       render: (_v, row) =>
-        row.sueldoPromedio > 0 ? formatCurrency(row.sueldoPromedio) : '—',
+        row.totalSueldo > 0 ? formatCurrency(row.totalSueldo) : '—',
     },
     {
       key: 'totalIngreso',
-      header: 'Ingreso año',
+      header: withInfo(
+        'Sueldo cubierto comercialmente',
+        TOOLTIPS.sueldoCubiertoComercialmente
+      ),
       numeric: true,
       render: (_v, row) =>
         row.totalIngreso > 0 ? formatCurrency(row.totalIngreso) : '—',
     },
     {
+      key: 'totalCosto',
+      header: withInfo('Sueldo ocupado', TOOLTIPS.sueldoOcupado),
+      numeric: true,
+      render: (_v, row) =>
+        row.totalCosto > 0 ? formatCurrency(row.totalCosto) : '—',
+    },
+    {
       key: 'totalMargen',
-      header: 'Margen año',
+      header: withInfo('Dif. cubierto vs ocupado', TOOLTIPS.difCubiertoOcupado),
       numeric: true,
       render: (_v, row) =>
         row.totalIngreso > 0 ? (
           <MargenCell value={row.totalMargen} percent={row.margenPercent} />
+        ) : (
+          <span className="text-tertiary">—</span>
+        ),
+    },
+    {
+      key: 'totalSueldoOcioso',
+      header: withInfo('Sueldo ocioso', TOOLTIPS.sueldoOcioso),
+      numeric: true,
+      render: (_v, row) =>
+        row.totalSueldo > 0 ? (
+          <OciosoCell value={row.totalSueldoOcioso} />
+        ) : (
+          <span className="text-tertiary">—</span>
+        ),
+    },
+    {
+      key: 'coberturaSalarial',
+      header: withInfo('Cobertura', TOOLTIPS.coberturaSalarialColumna),
+      numeric: true,
+      render: (_v, row) =>
+        row.totalSueldo > 0 ? (
+          <MargenCell value={row.totalCoberturaSalarial} />
         ) : (
           <span className="text-tertiary">—</span>
         ),
@@ -1138,17 +1253,6 @@ function rentabilidadAnnualColumns(
             horas={row.totalDiferenciaComercialHoras}
             plata={row.totalDiferenciaComercial}
           />
-        ) : (
-          <span className="text-tertiary">—</span>
-        ),
-    },
-    {
-      key: 'coberturaSalarial',
-      header: withInfo('Cobertura salarial', TOOLTIPS.coberturaSalarialColumna),
-      numeric: true,
-      render: (_v, row) =>
-        row.totalSueldo > 0 ? (
-          <MargenCell value={row.totalCoberturaSalarial} />
         ) : (
           <span className="text-tertiary">—</span>
         ),

@@ -10,7 +10,7 @@ export const TOOLTIPS = {
 
   // Dashboard BPs — Horas tab (tabla)
   horasLibresColumna:
-    'Horas contratadas menos horas asignadas. Capacidad disponible del BP que no está siendo aprovechada este mes.',
+    'Horas contratadas menos horas asignadas. Positivo: capacidad disponible sin aprovechar. Negativo (rojo): el BP está sobreasignado, se vendieron más horas de las que tiene contratadas.',
   costoHorasLibresColumna:
     'Valor en pesos de las horas libres: horas libres × (sueldo ÷ horas contratadas). Es la ociosidad, lo que la agencia paga por capacidad sin proyecto asignado. Accionable: vender esas horas.',
   ocupacionColumna:
@@ -33,6 +33,14 @@ export const TOOLTIPS = {
     'Diferencia por cálculo comercial: horas cotizadas menos horas asignadas, valorizada al precio del proyecto. Positivo (verde) = se cotizó de más, la agencia ahorra. Negativo (rojo) = se subcotizó, la agencia pierde. Es error de estimación, no ociosidad.',
   coberturaSalarialColumna:
     'Ingreso cotizado menos sueldo. Indica cuánto del sueldo fue cubierto por los proyectos asignados.',
+  sueldoCubiertoComercialmente:
+    'Lo que el BP generó según la tarifa de cada proyecto asignado: horas asignadas × (honorario del proyecto ÷ horas requeridas del proyecto). Es el ingreso cotizado.',
+  sueldoOcupado:
+    'Costo de las horas efectivamente asignadas: horas asignadas × (sueldo ÷ horas contratadas). Es la parte del sueldo que está siendo ocupada por proyectos.',
+  difCubiertoOcupado:
+    'Sueldo cubierto comercialmente menos sueldo ocupado. Positivo significa que lo cotizado supera el costo de las horas trabajadas.',
+  sueldoOcioso:
+    'Sueldo menos sueldo ocupado. Es la parte del sueldo que no está respaldada por horas asignadas. Negativo significa que el BP está sobreasignado.',
   costoReal:
     'Costo efectivo del BP según las horas que tuvo asignadas. Se calcula como: horas asignadas × (sueldo ÷ horas contratadas). Refleja lo que realmente costó el BP ese mes, no su sueldo total.',
 
@@ -53,6 +61,16 @@ export const TOOLTIPS = {
     'Ingresos menos costos acumulados del año, considerando solo los meses con actividad real.',
   margenAnual:
     'Rentabilidad anual como porcentaje de los ingresos del año.',
+
+  // Dashboard Proyectos — Diferencia comercial (tabla)
+  horasContratadasProyecto:
+    'Horas vendidas comercialmente del proyecto para el período: lo que se cotizó al cliente.',
+  horasAsignadasProyecto:
+    'Suma de las horas asignadas a todos los BPs del proyecto en el período.',
+  difHorasProyecto:
+    'Horas contratadas menos horas asignadas. Positivo: hay horas vendidas que nadie está cubriendo. Negativo (rojo): se asignaron más horas de las vendidas.',
+  difPlataProyecto:
+    'La diferencia en horas valorizada al valor/hora del proyecto (honorario del mes ÷ horas del proyecto).',
 
   // Dashboard Proyectos — Vista anual (tabla)
   ingresosColumnaAnual:
