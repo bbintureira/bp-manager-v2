@@ -531,3 +531,259 @@ export async function importAsignaciones(file: File): Promise<ImportResult> {
     }.`,
   }
 }
+
+// --------------------------------------------------------------------------
+// 4. Sueldos y horas contratadas
+// --------------------------------------------------------------------------
+
+/** Reads a workbook and returns a sheet by name, tolerating case and
+ *  surrounding whitespace. Returns null when the sheet isn't there. */
+function sheetRowsByName(
+  wb: XLSX.WorkBook,
+  name: string
+): Record<string, unknown>[] | null {
+  const target = name.toLowerCase().trim()
+  const hit = wb.SheetNames.find((n) => n.toLowerCase().trim() === target)
+  if (!hit) return null
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[hit], {
+    defval: null,
+    raw: true,
+  })
+}
+
+/** True for cells the user left empty. Blank is NOT zero — see the
+ *  contract documented on `exportSueldosYHoras`. */
+function isBlankCell(raw: unknown): boolean {
+  return raw == null || (typeof raw === 'string' && raw.trim() === '')
+}
+
+/**
+ * Number parser for the sueldos/horas grids. Returns null when the cell
+ * has content that isn't a number, so the caller can report it instead
+ * of silently dropping the value; blank cells are filtered out before
+ * this is called.
+ *
+ * Tolerates Argentine formatting ('$ 1.616.903,50', '2.005.317') because
+ * these grids get pasted into from the P&L, where numbers arrive as
+ * formatted text.
+ */
+function parseNumberLoose(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
+  let s = String(raw ?? '').trim()
+  if (!s) return null
+  // Strip currency, spaces and non-breaking spaces.
+  s = s.replace(/[$\s\u00a0]/g, '')
+  if (!s) return null
+
+  const hasComma = s.includes(',')
+  const hasDot = s.includes('.')
+  if (hasComma && hasDot) {
+    // Whichever separator comes last is the decimal one.
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+      s = s.replace(/\./g, '').replace(',', '.')
+    } else {
+      s = s.replace(/,/g, '')
+    }
+  } else if (hasComma) {
+    // Trailing ',dd' is a decimal comma; anything else is a thousands mark.
+    s = /,\d{1,2}$/.test(s) ? s.replace(',', '.') : s.replace(/,/g, '')
+  } else if (hasDot) {
+    // '1.234' / '2.005.317' are thousands groups, not decimals. A single
+    // dot followed by other than exactly 3 digits ('7.5') stays decimal.
+    if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '')
+  }
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
+}
+
+/** Reads the 12 month cells of a row, given the header prefix the
+ *  exporter writes ('Sueldo' / 'Horas'). Falls back to bare month labels
+ *  so a hand-made sheet with 'Ene…Dic' headers still works. */
+type Cell =
+  /** Empty cell — leave the table untouched for that month. */
+  | { kind: 'blank' }
+  | { kind: 'value'; value: number }
+  /** Non-empty but not a number — reported, never written. */
+  | { kind: 'invalid'; raw: string }
+
+function readMonthCells(row: Record<string, unknown>, prefix: string): Cell[] {
+  return MONTH_LABELS.map((label) => {
+    let cell = getCol(row, `${prefix} ${label}`)
+    if (cell === undefined) cell = getCol(row, label)
+    if (isBlankCell(cell)) return { kind: 'blank' }
+    const value = parseNumberLoose(cell)
+    if (value == null) return { kind: 'invalid', raw: String(cell) }
+    return { kind: 'value', value }
+  })
+}
+
+interface GridUpsert {
+  bp_id: string
+  mes: number
+  value: number
+}
+
+/** Shared parse of one editable sheet into (bp, mes, value) triples. */
+function parseGridSheet(
+  rows: Record<string, unknown>[],
+  prefix: string,
+  bpByName: Map<string, { id: string; nombre: string }>,
+  label: string,
+  errors: string[]
+): { upserts: GridUpsert[]; skippedRows: number } {
+  const upserts: GridUpsert[] = []
+  let skippedRows = 0
+
+  for (const row of rows) {
+    const nombre = trimStr(getCol(row, 'Nombre'))
+    if (!nombre) {
+      skippedRows++
+      continue
+    }
+    const bp = bpByName.get(nombre.toLowerCase())
+    if (!bp) {
+      skippedRows++
+      errors.push(`BP no encontrado: ${nombre}`)
+      continue
+    }
+    const cells = readMonthCells(row, prefix)
+    cells.forEach((cell, i) => {
+      // Blank cell: nothing loaded for that month — leave the table as is.
+      if (cell.kind === 'blank') return
+      if (cell.kind === 'invalid') {
+        errors.push(
+          `${label} no numérico para ${nombre} en ${MONTH_LABELS[i]}: "${cell.raw}"`
+        )
+        return
+      }
+      // A negative sueldo or capacity is never a real value; it is the
+      // signature of a derived report (margen, cobertura, "obsoleto")
+      // being uploaded by mistake. Refuse the cell instead of writing it.
+      if (cell.value < 0) {
+        errors.push(
+          `${label} negativo para ${nombre} en ${MONTH_LABELS[i]}: ${cell.value}`
+        )
+        return
+      }
+      upserts.push({ bp_id: String(bp.id), mes: i + 1, value: cell.value })
+    })
+  }
+  return { upserts, skippedRows }
+}
+
+/**
+ * Bulk edit of the two per-BP grids at once. Reads the 'Sueldos' and
+ * 'Horas contratadas' sheets written by `exportSueldosYHoras`; either
+ * one may be absent, and any other sheet (including the read-only
+ * 'Horas asignadas (ref)') is ignored.
+ */
+export async function importSueldosYHoras(file: File): Promise<ImportResult> {
+  const buf = await file.arrayBuffer()
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true })
+
+  const sueldosRows = sheetRowsByName(wb, 'Sueldos')
+  const capacidadRows = sheetRowsByName(wb, 'Horas contratadas')
+
+  if (sueldosRows == null && capacidadRows == null) {
+    return {
+      success: false,
+      imported: 0,
+      skipped: 0,
+      message:
+        'El archivo no tiene las hojas "Sueldos" ni "Horas contratadas". Descargá la planilla desde "Descargar sueldos y horas" y editá esa.',
+    }
+  }
+
+  const bpRes = await supabase.from('brand_partners').select('id, nombre')
+  if (bpRes.error) {
+    return {
+      success: false,
+      imported: 0,
+      skipped: 0,
+      message: `No se pudo leer BPs: ${bpRes.error.message ?? ''}`,
+    }
+  }
+  const bpByName = indexByName(
+    ((bpRes.data ?? []) as { id: string; nombre: string }[])
+  )
+
+  const errors: string[] = []
+  let skipped = 0
+
+  const sueldos = sueldosRows
+    ? parseGridSheet(sueldosRows, 'Sueldo', bpByName, 'Sueldo', errors)
+    : { upserts: [], skippedRows: 0 }
+  const capacidad = capacidadRows
+    ? parseGridSheet(capacidadRows, 'Horas', bpByName, 'Horas contratadas', errors)
+    : { upserts: [], skippedRows: 0 }
+  skipped = sueldos.skippedRows + capacidad.skippedRows
+
+  if (sueldos.upserts.length === 0 && capacidad.upserts.length === 0) {
+    return {
+      success: false,
+      imported: 0,
+      skipped,
+      message: `No se importó nada. ${errors[0] ?? 'Las hojas no tienen valores numéricos.'}`,
+    }
+  }
+
+  // Each sheet goes in one round-trip. The UNIQUE constraints these rely
+  // on — sueldos (bp_id, mes) and horas_contratadas (bp_id, mes) — are
+  // the same ones the full-year modals use.
+  if (sueldos.upserts.length > 0) {
+    const { error } = await supabase.from('sueldos').upsert(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      sueldos.upserts.map((u) => ({
+        bp_id: u.bp_id,
+        mes: u.mes,
+        sueldo: u.value,
+      })) as any,
+      { onConflict: 'bp_id,mes' }
+    )
+    if (error) {
+      return {
+        success: false,
+        imported: 0,
+        skipped,
+        message: `Upsert de sueldos falló: ${error.message}`,
+      }
+    }
+  }
+
+  if (capacidad.upserts.length > 0) {
+    const { error } = await supabase.from('horas_contratadas').upsert(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      capacidad.upserts.map((u) => ({
+        bp_id: u.bp_id,
+        mes: u.mes,
+        horas: u.value,
+      })) as any,
+      { onConflict: 'bp_id,mes' }
+    )
+    if (error) {
+      return {
+        success: false,
+        // Sueldos already committed above — say so rather than reporting 0.
+        imported: sueldos.upserts.length,
+        skipped,
+        message: `Sueldos OK (${sueldos.upserts.length}), pero el upsert de horas contratadas falló: ${error.message}`,
+      }
+    }
+  }
+
+  const parts: string[] = []
+  if (sueldos.upserts.length > 0) parts.push(`${sueldos.upserts.length} sueldos`)
+  if (capacidad.upserts.length > 0) {
+    parts.push(`${capacidad.upserts.length} horas contratadas`)
+  }
+  const warn =
+    errors.length > 0
+      ? ` · ${errors.length} celdas omitidas (${errors[0]}${errors.length > 1 ? '…' : ''})`
+      : ''
+  return {
+    success: true,
+    imported: sueldos.upserts.length + capacidad.upserts.length,
+    skipped,
+    message: `${parts.join(' y ')} actualizados${warn}.`,
+  }
+}

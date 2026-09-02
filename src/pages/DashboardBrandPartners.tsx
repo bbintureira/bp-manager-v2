@@ -62,9 +62,13 @@ import { matchesQuery, useSearch } from '@/hooks/useSearch'
 import {
   exportBrandPartners,
   exportBrandPartnersHoras,
+  exportSueldosYHoras,
   type BPRentabilidadExportRow,
 } from '@/utils/exportToExcel'
-import { importBrandPartners } from '@/utils/importFromExcel'
+import {
+  importBrandPartners,
+  importSueldosYHoras,
+} from '@/utils/importFromExcel'
 import { ExportButton } from '@/components/ui/export-button'
 import { UploadButton } from '@/components/ui/upload-button'
 import { cn } from '@/lib/utils'
@@ -424,7 +428,7 @@ export function DashboardBrandPartners() {
             : `Año ${CURRENT_YEAR}`
         } · ${tab === 'horas' ? 'Utilización de horas' : 'Rentabilidad en pesos'}`}
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <ExportButton
               label="Descargar rentabilidad"
               onExport={async () => {
@@ -460,6 +464,24 @@ export function DashboardBrandPartners() {
                 const snap = await getAnnualSnapshot()
                 exportBrandPartnersHoras(snap.brandPartners, snap.asignaciones)
               }}
+            />
+            <ExportButton
+              label="Descargar sueldos y horas"
+              onExport={async () => {
+                const snap = await getAnnualSnapshot()
+                exportSueldosYHoras({
+                  brandPartners: snap.brandPartners,
+                  sueldos: snap.sueldos,
+                  capacidades: snap.capacidadesMensuales,
+                  asignaciones: snap.asignaciones,
+                })
+              }}
+            />
+            <UploadButton
+              label="Subir sueldos y horas"
+              onFile={importSueldosYHoras}
+              onComplete={refetch}
+              disabled={!snapshot || loading}
             />
             <UploadButton
               label="Subir Excel"
