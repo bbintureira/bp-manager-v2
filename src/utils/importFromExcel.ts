@@ -36,6 +36,14 @@ const MONTH_LOOKUP: Record<string, number> = (() => {
   return out
 })()
 
+/** Long-form month names, accepted as column headers alongside the
+ *  abbreviations the exporter writes — hand-made sheets tend to spell
+ *  them out. */
+const MONTH_LABELS_FULL = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+]
+
 function mesFromLabel(raw: unknown): number {
   if (typeof raw === 'number' && raw >= 1 && raw <= 12) return raw
   const s = String(raw ?? '').trim().toLowerCase()
@@ -607,9 +615,20 @@ type Cell =
   | { kind: 'invalid'; raw: string }
 
 function readMonthCells(row: Record<string, unknown>, prefix: string): Cell[] {
-  return MONTH_LABELS.map((label) => {
-    let cell = getCol(row, `${prefix} ${label}`)
-    if (cell === undefined) cell = getCol(row, label)
+  return MONTH_LABELS.map((label, i) => {
+    // 'Sueldo Ene' (what the exporter writes) first, then the looser
+    // shapes a hand-made sheet is likely to use.
+    const candidates = [
+      `${prefix} ${label}`,
+      label,
+      `${prefix} ${MONTH_LABELS_FULL[i]}`,
+      MONTH_LABELS_FULL[i],
+    ]
+    let cell: unknown = undefined
+    for (const c of candidates) {
+      cell = getCol(row, c)
+      if (cell !== undefined) break
+    }
     if (isBlankCell(cell)) return { kind: 'blank' }
     const value = parseNumberLoose(cell)
     if (value == null) return { kind: 'invalid', raw: String(cell) }
