@@ -6,13 +6,13 @@ export const TOOLTIPS = {
   ocupacionPromedio:
     'Promedio de ocupación de todos los BPs del mes. Se calcula dividiendo las horas asignadas sobre las horas contratadas de cada BP.',
   horasLibresTotales:
-    'Suma de horas sin asignar de todos los BPs. Son horas que la agencia está pagando pero que no están generando ingresos en ningún proyecto. Un BP con horas contratadas y nada asignado cuenta con todas sus horas como libres.',
+    'Neto de horas libres de todos los BPs: las horas sin asignar de unos menos la sobreasignación de otros. Un BP con horas contratadas y nada asignado cuenta con todas sus horas como libres; uno sobreasignado resta. Positivo: capacidad que la agencia paga sin proyecto. Negativo: se vendieron más horas de las contratadas.',
 
   // Dashboard BPs — Horas tab (tabla)
   horasLibresColumna:
     'Horas contratadas menos horas asignadas. Positivo: capacidad disponible sin aprovechar. Negativo (rojo): el BP está sobreasignado, se vendieron más horas de las que tiene contratadas.',
   costoHorasLibresColumna:
-    'Valor en pesos de las horas libres: horas libres × (sueldo ÷ horas contratadas). Es la ociosidad, lo que la agencia paga por capacidad sin proyecto asignado. Accionable: vender esas horas.',
+    'Valor en pesos de las horas libres, con signo: horas libres × (sueldo ÷ horas contratadas). Positivo (naranja) es ociosidad, lo que la agencia paga por capacidad sin proyecto. Negativo (verde) es el beneficio de horas vendidas por encima de las contratadas. En los totales la sobreasignación de un BP compensa la ociosidad de otro.',
   ocupacionColumna:
     'Horas asignadas ÷ horas contratadas × 100. Verde: ≥85%. Naranja: 60–84%. Rojo: <60%.',
 

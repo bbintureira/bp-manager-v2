@@ -1316,16 +1316,15 @@ export interface BPHorasMonthRow {
   horasAsignadas: number
   /**
    * contratadas - asignadas, SIGNED. A negative value means the BP is
-   * over-assigned (sold beyond capacity) — real information, so it is
-   * surfaced as-is instead of being clamped to 0.
+   * over-assigned (sold beyond capacity). Idle hours NET across BPs and
+   * across months: one BP 20h idle and another 20h over-assigned is 0h
+   * for the team — the over-assignment is capacity sold without paying
+   * for it, so it offsets the ociosidad. Never clamp this.
    */
   horasLibres: number
-  /** max(0, horasLibres) — idle capacity only. Over-assignment doesn't
-   *  create negative ociosidad, so the cost / annual idle aggregates use
-   *  this instead of the signed `horasLibres`. */
-  horasOciosas: number
-  /** Idle cost in pesos: horasOciosas × (sueldo[mes] / capacidad). What the
-   *  agency pays for unassigned capacity this month. */
+  /** Idle cost in pesos, SIGNED: horasLibres × (sueldo[mes] / capacidad).
+   *  Positive = what the agency pays for unassigned capacity; negative =
+   *  the benefit of hours sold beyond capacity. Nets like `horasLibres`. */
   costoHorasLibres: number
   /** asignadas / contratadas × 100 (0 if no capacity). */
   ocupacion: number
@@ -1352,7 +1351,6 @@ export function bpHorasMonthRow(
       horasContratadas: 0,
       horasAsignadas: 0,
       horasLibres: 0,
-      horasOciosas: 0,
       costoHorasLibres: 0,
       ocupacion: 0,
       byProject: [],
@@ -1368,13 +1366,13 @@ export function bpHorasMonthRow(
     (a) => a.mes === mes && same(a.bp_id, bp.id)
   )
   const horasAsignadas = own.reduce((s, a) => s + num(a.horas), 0)
-  // Signed: over-assignment shows as a negative "libres" in the table.
+  // Signed: over-assignment shows as a negative "libres" in the table and
+  // offsets other BPs' idle hours in every aggregate.
   const horasLibres = horasContratadas - horasAsignadas
-  const horasOciosas = Math.max(0, horasLibres)
-  // Value the idle hours at the BP's hourly cost (sueldo[mes] / capacidad).
-  // Uses the clamped value — being over-assigned costs nothing extra.
+  // Value the idle hours at the BP's hourly cost (sueldo[mes] / capacidad),
+  // keeping the sign: over-assignment becomes a negative cost (a benefit).
   const costoHorasLibres =
-    horasOciosas * valorHoraBPForMonth(bp, sueldos, mes, capacidades)
+    horasLibres * valorHoraBPForMonth(bp, sueldos, mes, capacidades)
   const ocupacion =
     horasContratadas > 0 ? (horasAsignadas / horasContratadas) * 100 : 0
   const tieneActividad = bpTieneActividad(
@@ -1411,7 +1409,6 @@ export function bpHorasMonthRow(
     horasContratadas,
     horasAsignadas,
     horasLibres,
-    horasOciosas,
     costoHorasLibres,
     ocupacion,
     byProject,
@@ -1445,10 +1442,8 @@ export function bpHorasPeriodRow(
   const horasAsignadas = active.reduce((s, r) => s + r.horasAsignadas, 0)
   // Signed net across the period, so an over-assigned month offsets an
   // idle one — that IS the commercial reading of "libres" for a quarter.
+  // The cost nets the same way (each month's cost is already signed).
   const horasLibres = horasContratadas - horasAsignadas
-  // Ociosidad never nets: idle hours in one month stay sellable even if
-  // another month was over-assigned.
-  const horasOciosas = active.reduce((s, r) => s + r.horasOciosas, 0)
   const costoHorasLibres = active.reduce((s, r) => s + r.costoHorasLibres, 0)
   const ocupacion =
     horasContratadas > 0 ? (horasAsignadas / horasContratadas) * 100 : 0
@@ -1472,7 +1467,6 @@ export function bpHorasPeriodRow(
     horasContratadas,
     horasAsignadas,
     horasLibres,
-    horasOciosas,
     costoHorasLibres,
     ocupacion,
     byProject,
@@ -1826,11 +1820,12 @@ export interface BPHorasAnnualAggregate {
   totalContratadas: number
   /** Σ horas asignadas across 12 months. */
   totalAsignadas: number
-  /** contratadas - asignadas (≥0). */
+  /** contratadas - asignadas over active months, SIGNED: over-assigned
+   *  months offset idle ones. Negative = the BP sold more than contracted. */
   totalLibres: number
-  /** Σ (horasLibres_m × valorHora_m) over active months — the idle cost in
-   *  pesos, summed month-by-month so monthly sueldo variation is respected
-   *  (NOT totalLibres × an average rate). */
+  /** Σ (horasLibres_m × valorHora_m) over active months — the signed idle
+   *  cost in pesos, summed month-by-month so monthly sueldo variation is
+   *  respected (NOT totalLibres × an average rate). */
   costoHorasLibres: number
   /** weighted: totalAsignadas / totalContratadas × 100. */
   ocupacionPromedio: number
@@ -1868,18 +1863,16 @@ export function bpHorasAnnualAggregate(
     (s, m) => s + m.horasAsignadas,
     0
   )
-  // Idle hours + idle cost, both summed month-by-month over active months.
-  // Idle does NOT net across months: a BP over-assigned in one month and
-  // idle in another still has real, sellable idle hours — so we sum
-  // `max(0, contratadas_m − asignadas_m)` per month rather than the annual
-  // net. This keeps `totalLibres` consistent with `costoHorasLibres` and
-  // with the monthly view. (Intentionally changes the number for
-  // over-assigned BPs vs the old net calculation.)
+  // Idle hours + idle cost, both summed month-by-month over active months,
+  // SIGNED: a month over-assigned offsets a month idle, same as one BP's
+  // over-assignment offsets another's idle hours in the monthly KPIs.
+  // Summing per month (rather than totalLibres × an average rate) keeps
+  // the cost faithful to each month's sueldo.
   let totalLibres = 0
   let costoHorasLibres = 0
   for (const m of mesesActivos) {
     const row = year.byMonth[m - 1]
-    totalLibres += row?.horasOciosas ?? 0
+    totalLibres += row?.horasLibres ?? 0
     costoHorasLibres += row?.costoHorasLibres ?? 0
   }
   const ocupacionPromedio =

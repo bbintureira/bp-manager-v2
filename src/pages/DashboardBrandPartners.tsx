@@ -313,9 +313,9 @@ export function DashboardBrandPartners() {
         (s, r) => s + r.horasAsignadas,
         0
       )
-      // Idle KPI uses the clamped value: over-assignment in one BP must
-      // not cancel out real idle capacity in another.
-      const totalLibres = filteredHoras.reduce((s, r) => s + r.horasOciosas, 0)
+      // Idle KPI is a signed net: over-assignment in one BP offsets idle
+      // capacity in another (sold beyond capacity = hours not paid for).
+      const totalLibres = filteredHoras.reduce((s, r) => s + r.horasLibres, 0)
       const totalCostoLibres = filteredHoras.reduce(
         (s, r) => s + r.costoHorasLibres,
         0
@@ -572,19 +572,23 @@ export function DashboardBrandPartners() {
             />
             <KpiCard
               label={withInfo('Horas libres totales', TOOLTIPS.horasLibresTotales)}
-              value={formatCompactHours(Math.round(kpiStats.totalLibres))}
+              value={
+                <span className={costoLibresTone(kpiStats.totalLibres)}>
+                  {formatCompactHours(Math.round(kpiStats.totalLibres))}
+                </span>
+              }
               fullValue={formatHours(Math.round(kpiStats.totalLibres))}
               meta={scopeMeta}
             />
             <KpiCard
               label={withInfo('Costo libres total', TOOLTIPS.costoHorasLibresColumna)}
               value={
-                <span className={kpiStats.totalCostoLibres > 0 ? 'text-warning' : undefined}>
+                <span className={costoLibresTone(kpiStats.totalCostoLibres)}>
                   {formatCompactCurrency(kpiStats.totalCostoLibres)}
                 </span>
               }
               fullValue={formatCurrency(kpiStats.totalCostoLibres)}
-              meta={`ociosidad ${scopeMeta}`}
+              meta={`ociosidad neta ${scopeMeta}`}
             />
           </>
         ) : kpiStats.kind === 'año' ? (
@@ -600,19 +604,23 @@ export function DashboardBrandPartners() {
             />
             <KpiCard
               label="Horas libres prom."
-              value={formatCompactHours(Math.round(kpiStats.libresPromedioMes))}
+              value={
+                <span className={costoLibresTone(kpiStats.libresPromedioMes)}>
+                  {formatCompactHours(Math.round(kpiStats.libresPromedioMes))}
+                </span>
+              }
               fullValue={formatHours(Math.round(kpiStats.libresPromedioMes))}
-              meta="por mes"
+              meta="por mes, neto"
             />
             <KpiCard
               label={withInfo('Costo libres total', TOOLTIPS.costoHorasLibresColumna)}
               value={
-                <span className={kpiStats.totalCostoLibres > 0 ? 'text-warning' : undefined}>
+                <span className={costoLibresTone(kpiStats.totalCostoLibres)}>
                   {formatCompactCurrency(kpiStats.totalCostoLibres)}
                 </span>
               }
               fullValue={formatCurrency(kpiStats.totalCostoLibres)}
-              meta="ociosidad del año"
+              meta="ociosidad neta del año"
             />
           </>
         ) : kpiStats.kind === 'rentabilidad-mes' ? (
@@ -818,6 +826,28 @@ function ComercialDiffCell({ horas, plata }: { horas: number; plata: number }) {
 
 /** Horas libres (contratadas − asignadas). Negative = over-assigned, shown
  *  in red with an explicit minus so it reads as "sobrevendido". */
+/** Tone for a signed idle figure (hours or pesos): positive = idle cost
+ *  (warning), negative = over-assigned, i.e. a benefit (success). */
+function costoLibresTone(value: number): string | undefined {
+  const rounded = Math.round(value)
+  if (rounded > 0) return 'text-warning'
+  if (rounded < 0) return 'text-success'
+  return undefined
+}
+
+/** Signed currency for the costo libres cells. Positive (warning) is idle
+ *  cost; negative (success) is the benefit of hours sold beyond capacity. */
+function CostoLibresCell({ value }: { value: number }) {
+  const rounded = Math.round(value)
+  if (rounded === 0) return <span className="text-tertiary">—</span>
+  return (
+    <span className={cn('font-mono tabular-nums', costoLibresTone(rounded))}>
+      {rounded < 0 ? '−' : ''}
+      {formatCurrency(Math.abs(rounded))}
+    </span>
+  )
+}
+
 function LibresCell({ horas }: { horas: number }) {
   const rounded = Math.round(horas)
   return (
@@ -910,14 +940,7 @@ function horasColumns(
       key: 'costoHorasLibres',
       header: withInfo('Costo libres', TOOLTIPS.costoHorasLibresColumna),
       numeric: true,
-      render: (_v, row) =>
-        row.costoHorasLibres > 0 ? (
-          <span className="text-warning">
-            {formatCurrency(row.costoHorasLibres)}
-          </span>
-        ) : (
-          <span className="text-tertiary">—</span>
-        ),
+      render: (_v, row) => <CostoLibresCell value={row.costoHorasLibres} />,
     },
     {
       key: 'ocupacion',
@@ -1138,22 +1161,16 @@ function horasAnnualColumns(
     },
     {
       key: 'totalLibres',
-      header: 'Libres año',
+      header: withInfo('Libres año', TOOLTIPS.horasLibresColumna),
       numeric: true,
-      render: (_v, row) => formatHours(Math.round(row.totalLibres)),
+      // Signed net over the year: over-assigned months offset idle ones.
+      render: (_v, row) => <LibresCell horas={row.totalLibres} />,
     },
     {
       key: 'costoHorasLibres',
       header: withInfo('Costo libres', TOOLTIPS.costoHorasLibresColumna),
       numeric: true,
-      render: (_v, row) =>
-        row.costoHorasLibres > 0 ? (
-          <span className="text-warning">
-            {formatCurrency(row.costoHorasLibres)}
-          </span>
-        ) : (
-          <span className="text-tertiary">—</span>
-        ),
+      render: (_v, row) => <CostoLibresCell value={row.costoHorasLibres} />,
     },
     {
       key: 'ocupacionPromedio',

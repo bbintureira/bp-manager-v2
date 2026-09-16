@@ -458,7 +458,8 @@ function HorasAnual({
     (s, m) => s + m.horasContratadas,
     0
   )
-  const totalLibres = Math.max(0, totalContratadas - totalAsignadas)
+  // Signed net: over-assigned months offset idle ones.
+  const totalLibres = totalContratadas - totalAsignadas
   const ocupAvg =
     totalContratadas > 0 ? (totalAsignadas / totalContratadas) * 100 : 0
 

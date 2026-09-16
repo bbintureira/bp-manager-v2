@@ -192,6 +192,13 @@ per-hour rates that use the new capacity fields, falling back to the legacy `160
 - **Horas contratadas sin asignar = ociosidad.** Un BP contratado por 160 h en
   un mes sin asignaciones tiene 160 h libres y todo su sueldo es ocioso. Ese
   mes cuenta en KPIs, tablas, modal de detalle y `/api/export`.
+- **Las horas libres son un neto con signo, nunca se clampean a 0.** La
+  sobreasignación de un BP compensa la ociosidad de otro, y un mes sobreasignado
+  compensa un mes ocioso del mismo BP. Dos BPs de 100 h con el mismo sueldo, uno
+  con 80 asignadas y otro con 120 → 0 h libres y $0 de costo libres. El costo
+  (`costoHorasLibres`) lleva el mismo signo: positivo = ociosidad que paga la
+  agencia, negativo = beneficio por horas vendidas por encima de la capacidad.
+  `sueldoOcioso` ya funcionaba así (sueldo − costo, negativo si sobreasignado).
 - **`fecha_ingreso` del BP:** los cálculos anuales solo cuentan desde el mes de
   ingreso en adelante. BPs inactivos se capean al último mes con sueldo cargado.
 - **Filtro de mes:** las listas de proyectos y BPs en vista mensual solo muestran
