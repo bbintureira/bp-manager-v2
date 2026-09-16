@@ -716,11 +716,11 @@ export function summarizeProjectsPeriod(
 
 export interface BPAnnualSummary {
   bp: BrandPartner
-  /** Σ sueldo over the months where the BP actually has assigned hours.
-   *  Months with a sueldo row but no work (a BP who left mid-year, or
-   *  future months loaded ahead of their asignaciones) are NOT counted —
-   *  otherwise "Sueldo año" over-reports against every other aggregate,
-   *  which all restrict to months with hours. */
+  /** Σ sueldo over the months with activity (`bpTieneActividad`: assigned
+   *  hours OR an explicit `horas_contratadas` row). Months with only a
+   *  sueldo row (a BP who left mid-year, future months loaded ahead of
+   *  their capacity) are NOT counted — otherwise "Sueldo año" over-reports
+   *  against every other aggregate, which all use the same rule. */
   totalSueldo: number
   /** Mean sueldo over those same months (only the ones with a value). */
   avgSueldo: number
@@ -739,15 +739,18 @@ export interface BPAnnualSummary {
 export function summarizeBPsAnnual(
   brandPartners: BrandPartner[],
   asignaciones: Asignacion[],
-  sueldos: Sueldo[]
+  sueldos: Sueldo[],
+  capacidades: CapacidadMensual[] = []
 ): BPAnnualSummary[] {
   return brandPartners.map((bp) => {
     const byMonth = MONTHS.map((m) =>
       calculateBPSummary(bp, asignaciones, sueldos, m)
     )
-    // Restricted to months with assigned hours — same rule as
+    // Restricted to months with activity — same rule as
     // `bpRentabilidadAnnualAggregate`. See the field docs above.
-    const activeMonths = byMonth.filter((m) => m.totalHoras > 0)
+    const activeMonths = byMonth.filter((_x, i) =>
+      bpTieneActividad(bp, asignaciones, capacidades, MONTHS[i], sueldos)
+    )
     const totalSueldo = activeMonths.reduce((s, x) => s + x.sueldoMensual, 0)
     const monthsWithSueldo = activeMonths.filter((x) => x.sueldoMensual > 0)
     const avgSueldo =
@@ -1180,6 +1183,38 @@ export function capacidadBPForMonth(
   return HOURS_PER_MONTH
 }
 
+/**
+ * "Mes con actividad" for a BP — THE unit every aggregate uses to decide
+ * whether a month counts (period rows, annual totals, table visibility in
+ * the BP dashboard and the detail modal, `/api/export`). A month counts
+ * when the BP is inside its active window AND
+ *   - has at least one hour assigned that month, OR
+ *   - has an explicit `horas_contratadas` row > 0 for that month.
+ *
+ * The second clause is what turns contracted-but-unassigned capacity into
+ * ociosidad: a BP hired for 160h in December with nothing assigned has
+ * 160 idle hours, and their whole sueldo that month is idle cost. Only an
+ * explicit row activates a month — the scalar / 160 fallbacks never do,
+ * otherwise every BP would look idle for all 12 months and empty future
+ * months would get projected.
+ */
+export function bpTieneActividad(
+  bp: BrandPartner,
+  asignaciones: Asignacion[],
+  capacidades: CapacidadMensual[],
+  mes: number,
+  sueldos: Sueldo[] = []
+): boolean {
+  if (!inActiveWindow(bp, mes, sueldos)) return false
+  const asignado = asignaciones.some(
+    (a) => a.mes === mes && same(a.bp_id, bp.id) && num(a.horas) > 0
+  )
+  if (asignado) return true
+  return capacidades.some(
+    (c) => c.mes === mes && same(c.bp_id, bp.id) && num(c.horas) > 0
+  )
+}
+
 /** Per-BP per-month sueldo lookup with fallback. */
 function pickSueldoMensual(
   bp: BrandPartner,
@@ -1271,6 +1306,9 @@ export interface BPProjectHorasRow {
 
 export interface BPHorasMonthRow {
   bp: BrandPartner
+  /** `bpTieneActividad` for this mes: hours assigned OR an explicit
+   *  `horas_contratadas` row > 0. Aggregates and tables filter on this. */
+  tieneActividad: boolean
   /** Contracted capacity for this mes: the `horas_contratadas` row, else
    *  the scalar `capacidad_horas_mensual`, else 160. */
   horasContratadas: number
@@ -1310,6 +1348,7 @@ export function bpHorasMonthRow(
   if (!inActiveWindow(bp, mes, sueldos)) {
     return {
       bp,
+      tieneActividad: false,
       horasContratadas: 0,
       horasAsignadas: 0,
       horasLibres: 0,
@@ -1338,6 +1377,13 @@ export function bpHorasMonthRow(
     horasOciosas * valorHoraBPForMonth(bp, sueldos, mes, capacidades)
   const ocupacion =
     horasContratadas > 0 ? (horasAsignadas / horasContratadas) * 100 : 0
+  const tieneActividad = bpTieneActividad(
+    bp,
+    asignaciones,
+    capacidades,
+    mes,
+    sueldos
+  )
 
   // Group asignaciones by project (a BP could have multiple rows per
   // project, though in practice not; we sum just in case). Skip zero-hour
@@ -1361,6 +1407,7 @@ export function bpHorasMonthRow(
 
   return {
     bp,
+    tieneActividad,
     horasContratadas,
     horasAsignadas,
     horasLibres,
@@ -1376,11 +1423,11 @@ export function bpHorasMonthRow(
  * building block for the quarterly (Q1..Q4) scope. Returns the same shape
  * as a single-month row so the tables render either scope unchanged.
  *
- * Only months where the BP actually has assigned hours contribute
- * capacity, mirroring the annual rule: never project contracted hours
- * into months with no data. With a single mes this is equivalent to
- * `bpHorasMonthRow` for every row the tables actually display (they all
- * filter on `horasAsignadas > 0`).
+ * Only months with activity (`bpTieneActividad`: assigned hours OR an
+ * explicit `horas_contratadas` row) contribute capacity, mirroring the
+ * annual rule: never project fallback capacity into months with no data.
+ * With a single mes this is equivalent to `bpHorasMonthRow` for every row
+ * the tables actually display (they all filter on `tieneActividad`).
  */
 export function bpHorasPeriodRow(
   bp: BrandPartner,
@@ -1393,7 +1440,7 @@ export function bpHorasPeriodRow(
   const rows = meses.map((m) =>
     bpHorasMonthRow(bp, asignaciones, proyectos, m, sueldos, capacidades)
   )
-  const active = rows.filter((r) => r.horasAsignadas > 0)
+  const active = rows.filter((r) => r.tieneActividad)
   const horasContratadas = active.reduce((s, r) => s + r.horasContratadas, 0)
   const horasAsignadas = active.reduce((s, r) => s + r.horasAsignadas, 0)
   // Signed net across the period, so an over-assigned month offsets an
@@ -1421,6 +1468,7 @@ export function bpHorasPeriodRow(
 
   return {
     bp,
+    tieneActividad: active.length > 0,
     horasContratadas,
     horasAsignadas,
     horasLibres,
@@ -1469,6 +1517,10 @@ export interface BPProjectRentabilidadRow {
 
 export interface BPRentabilidadMonthRow {
   bp: BrandPartner
+  /** `bpTieneActividad` for this mes: hours assigned OR an explicit
+   *  `horas_contratadas` row > 0. A month with capacity but no projects
+   *  still counts — its whole sueldo is `sueldoOcioso`. */
+  tieneActividad: boolean
   /** sueldo for the month (sueldos table → bp.sueldo_mensual). */
   sueldoMensual: number
   /** Σ ingreso across projects this BP touched in `mes`. */
@@ -1512,6 +1564,7 @@ export function bpRentabilidadMonthRow(
   if (!inActiveWindow(bp, mes, sueldos)) {
     return {
       bp,
+      tieneActividad: false,
       sueldoMensual: 0,
       ingresoCotizado: 0,
       costo: 0,
@@ -1616,10 +1669,19 @@ export function bpRentabilidadMonthRow(
   // NOT costo vs. sueldo (that would measure utilization, not coverage).
   const coberturaSalarial = ingresoCotizado - sueldoMensual
   // Sueldo ocioso: the part of the salary the assigned hours don't consume.
+  // With capacity contracted and nothing assigned this is the full sueldo.
   const sueldoOcioso = sueldoMensual - costo
+  const tieneActividad = bpTieneActividad(
+    bp,
+    asignaciones,
+    capacidades,
+    mes,
+    sueldos
+  )
 
   return {
     bp,
+    tieneActividad,
     sueldoMensual,
     ingresoCotizado,
     costo,
@@ -1638,9 +1700,9 @@ export function bpRentabilidadMonthRow(
  * the building block for the quarterly (Q1..Q4) scope. Same shape as a
  * single-month row so the tables render either scope unchanged.
  *
- * Sueldo is only summed over months where the BP actually has projects
- * assigned, matching the annual aggregate: months with no activity would
- * otherwise inflate the salary while the ingreso stays at 0.
+ * Sueldo is only summed over months with activity (`bpTieneActividad`),
+ * matching the annual aggregate: months with neither hours nor contracted
+ * capacity would otherwise inflate the salary while the ingreso stays at 0.
  */
 export function bpRentabilidadPeriodRow(
   bp: BrandPartner,
@@ -1664,7 +1726,7 @@ export function bpRentabilidadPeriodRow(
       capacidades
     )
   )
-  const active = rows.filter((r) => r.byProject.length > 0)
+  const active = rows.filter((r) => r.tieneActividad)
   const sueldoMensual = active.reduce((s, r) => s + r.sueldoMensual, 0)
   const ingresoCotizado = active.reduce((s, r) => s + r.ingresoCotizado, 0)
   const costo = active.reduce((s, r) => s + r.costo, 0)
@@ -1708,6 +1770,7 @@ export function bpRentabilidadPeriodRow(
 
   return {
     bp,
+    tieneActividad: active.length > 0,
     sueldoMensual,
     ingresoCotizado,
     costo,
@@ -1773,6 +1836,9 @@ export interface BPHorasAnnualAggregate {
   ocupacionPromedio: number
   /** Per-month horas asignadas, indexed 0..11. */
   byMonth: number[]
+  /** Months (1-12) that count for this BP — `bpTieneActividad`. Drives
+   *  which month columns the annual tables render. */
+  mesesActivos: number[]
 }
 
 export function bpHorasAnnualAggregate(
@@ -1783,25 +1849,19 @@ export function bpHorasAnnualAggregate(
   capacidades: CapacidadMensual[] = []
 ): BPHorasAnnualAggregate {
   const year = bpHorasYear(bp, asignaciones, proyectos, sueldos, capacidades)
-  const mesIngreso = getMesIngreso(bp)
-  const mesEgreso = getMesEgreso(bp, sueldos)
 
-  // Annual `Contratadas` only counts months (in window) where this BP
-  // actually has at least one asignacion loaded — so future / empty
-  // months don't inflate the denominator. Per-month rows stay full
-  // capacidad; this rule applies only to the annual aggregate.
-  const monthsWithAsig = new Set<number>()
-  for (const a of asignaciones) {
-    if (!same(a.bp_id, bp.id)) continue
-    const m = Number(a.mes)
-    if (!Number.isFinite(m) || m < mesIngreso || m > mesEgreso) continue
-    if (num(a.horas) <= 0) continue
-    monthsWithAsig.add(m)
-  }
+  // Annual `Contratadas` only counts months with activity (assigned hours
+  // OR an explicit `horas_contratadas` row) — so months with nothing on
+  // file don't inflate the denominator, while contracted-but-unassigned
+  // months DO count as idle. Per-month rows stay full capacidad; this rule
+  // applies only to the annual aggregate.
+  const mesesActivos = year.byMonth
+    .map((row, i) => (row.tieneActividad ? i + 1 : 0))
+    .filter((m) => m > 0)
   // Capacity now varies per month, so the annual total is the sum over the
   // active months — not `months × a single scalar`.
   let totalContratadas = 0
-  for (const m of monthsWithAsig) {
+  for (const m of mesesActivos) {
     totalContratadas += year.byMonth[m - 1]?.horasContratadas ?? 0
   }
   const totalAsignadas = year.byMonth.reduce(
@@ -1817,7 +1877,7 @@ export function bpHorasAnnualAggregate(
   // over-assigned BPs vs the old net calculation.)
   let totalLibres = 0
   let costoHorasLibres = 0
-  for (const m of monthsWithAsig) {
+  for (const m of mesesActivos) {
     const row = year.byMonth[m - 1]
     totalLibres += row?.horasOciosas ?? 0
     costoHorasLibres += row?.costoHorasLibres ?? 0
@@ -1832,6 +1892,7 @@ export function bpHorasAnnualAggregate(
     costoHorasLibres,
     ocupacionPromedio,
     byMonth: year.byMonth.map((m) => m.horasAsignadas),
+    mesesActivos,
   }
 }
 
@@ -1845,11 +1906,12 @@ export interface BPRentabilidadAnnualAggregate {
   totalMargen: number
   /** margen / ingreso × 100. */
   margenPercent: number
-  /** Mean monthly sueldo, restricted to months where the BP had at least
-   *  one hour assigned (so empty / future months don't drag the avg). */
+  /** Mean monthly sueldo, restricted to months with activity
+   *  (`bpTieneActividad`) so empty / future months don't drag the avg. */
   sueldoPromedio: number
-  /** Σ sueldoMensual across months where the BP had at least one hour
-   *  assigned — keeps the annual sueldo aligned with annual ingreso. */
+  /** Σ sueldoMensual across months with activity — assigned hours OR an
+   *  explicit `horas_contratadas` row. Contracted-but-idle months count
+   *  in full (their sueldo is pure `sueldoOcioso`). */
   totalSueldo: number
   /** totalIngreso − totalSueldo. */
   totalCoberturaSalarial: number
@@ -1885,18 +1947,16 @@ export function bpRentabilidadAnnualAggregate(
   const totalCosto = year.byMonth.reduce((s, m) => s + m.costo, 0)
   const totalMargen = totalIngreso - totalCosto
   const margenPercent = totalIngreso > 0 ? (totalMargen / totalIngreso) * 100 : 0
-  // Months where the BP has at least one hour assigned. Salary aggregations
-  // are restricted to this set so months without activity don't inflate the
+  // Months with activity (`bpTieneActividad`). Salary aggregations are
+  // restricted to this set so months with nothing on file don't inflate the
   // annual sueldo while ingreso stays at 0 (would otherwise show a
-  // misleading negative coverage).
-  const monthsWithAsig = new Set<number>()
-  for (const a of asignaciones) {
-    if (!same(a.bp_id, bp.id)) continue
-    const m = Number(a.mes)
-    if (!Number.isFinite(m) || m < 1 || m > 12) continue
-    if (num(a.horas) <= 0) continue
-    monthsWithAsig.add(m)
-  }
+  // misleading negative coverage). Contracted-but-unassigned months are
+  // in — that sueldo IS idle cost the agency pays.
+  const monthsWithAsig = new Set<number>(
+    year.byMonth
+      .map((row, i) => (row.tieneActividad ? i + 1 : 0))
+      .filter((m) => m > 0)
+  )
   const sueldosForActiveMonths = year.byMonth
     .map((row, i) => ({ mes: i + 1, sueldo: row.sueldoMensual }))
     .filter(({ mes, sueldo }) => monthsWithAsig.has(mes) && sueldo > 0)

@@ -88,10 +88,13 @@ y los dashboards consuman sin tocar la UI ni el Excel.
   estructural, no reimplementada. Se puede importar porque calculations.ts sólo
   hace `import type` de queries.ts, y eso se borra en compilación.
 - Reglas de inclusión, alineadas con las tablas: un BP entra en el mes si tiene
-  horas asignadas **o** una fila de sueldo cargada (incluye inactivos, con flag
-  `activo`); un proyecto entra si tiene horas asignadas **o** honorarios
-  cargados. El bloque `totales` suma sólo los BPs con asignaciones — así
-  coincide con los KPIs de la pestaña Rentabilidad con filtro "Todos".
+  **actividad** (horas asignadas **o** fila de `horas_contratadas` > 0, ver
+  `bpTieneActividad`) **o** una fila de sueldo cargada (incluye inactivos, con
+  flag `activo`); un proyecto entra si tiene horas asignadas **o** honorarios
+  cargados. El bloque `totales` suma sólo los BPs con actividad
+  (`tiene_actividad` por fila, `bps_con_actividad` como conteo) — así coincide
+  con los KPIs de la pestaña Rentabilidad con filtro "Todos".
+  `bps_con_asignaciones` sigue contando sólo los que tienen proyectos.
 - `?year=` se acepta y se devuelve, pero **no filtra**: el esquema no tiene
   dimensión de año (ver "Schema invariants"). La respuesta lo aclara en `meta`.
   El plan para resolverlo está en "Plan: columna de año" más abajo.
@@ -139,6 +142,12 @@ Layout is full-width: `AppLayout` has no `max-w` cap on the content area. Tables
   parámetro opcional `capacidades`. Una fila en 0 se respeta como "este mes no
   tiene capacidad" y NO cae al escalar — así se modela una dedicación que baja
   a cero sin borrar la fila.
+  Desde 2026-09-16 una fila > 0 además **activa el mes** aunque el BP no tenga
+  nada asignado: sus horas contratadas quedan como ociosas y el sueldo completo
+  como sueldo ocioso. La regla es `bpTieneActividad` en calculations.ts
+  (asignadas > 0 **o** fila de `horas_contratadas` > 0, dentro de la ventana
+  ingreso/egreso). El escalar y el 160 de fallback NUNCA activan un mes — si
+  no, todos los BPs quedarían ociosos los 12 meses.
 - **`proyecto_honorarios_mensuales`** is the table for per-month project honorarios: `(id, proyecto_id, mes, honorarios, created_at)`. `createProyecto` seeds 12 rows on insert (defaulting all months to the project's scalar `honorarios_cotizador`). The scalar is left untouched after subsequent edits — keep this in mind if a future view needs to read "current honorarios": prefer `proyecto_honorarios_mensuales` over `proyectos.honorarios_cotizador` when per-month accuracy matters.
 
 **Required UNIQUE constraints (for `upsert(... { onConflict })` calls)**:
@@ -176,9 +185,13 @@ per-hour rates that use the new capacity fields, falling back to the legacy `160
 
 ## Reglas de lógica de negocio (NO romper)
 
-- **Vista anual:** solo sumar/mostrar meses donde hay al menos un BP asignado.
+- **Vista anual:** solo sumar/mostrar meses con actividad (`bpTieneActividad`):
+  al menos un BP con horas asignadas **o** con fila de `horas_contratadas` > 0.
   Nunca proyectar hacia meses futuros vacíos, nunca anualizar los 12 meses si el
   BP arrancó a mitad de año.
+- **Horas contratadas sin asignar = ociosidad.** Un BP contratado por 160 h en
+  un mes sin asignaciones tiene 160 h libres y todo su sueldo es ocioso. Ese
+  mes cuenta en KPIs, tablas, modal de detalle y `/api/export`.
 - **`fecha_ingreso` del BP:** los cálculos anuales solo cuentan desde el mes de
   ingreso en adelante. BPs inactivos se capean al último mes con sueldo cargado.
 - **Filtro de mes:** las listas de proyectos y BPs en vista mensual solo muestran

@@ -136,19 +136,16 @@ export function BPDetailModal({
     }
   }, [open, bp])
 
-  // Months in which this BP has at least one asignacion — computed per
-  // tab so Rentabilidad and Horas each respect their own data shape.
-  // Drives the clickable bars and the Mensual prev/next steppers.
+  // Months with activity for this BP (assigned hours OR an explicit
+  // `horas_contratadas` row) — computed per tab so Rentabilidad and Horas
+  // each read their own rows. Drives the clickable bars and the Mensual
+  // prev/next steppers.
   const activeMonths = useMemo(() => {
     if (!data) return [] as number[]
     if (activeTab === 'horas') {
-      return MONTHS.filter(
-        (_m, i) => data.horasYear.byMonth[i].horasAsignadas > 0
-      )
+      return MONTHS.filter((_m, i) => data.horasYear.byMonth[i].tieneActividad)
     }
-    return MONTHS.filter(
-      (_m, i) => data.rentaYear.byMonth[i].byProject.length > 0
-    )
+    return MONTHS.filter((_m, i) => data.rentaYear.byMonth[i].tieneActividad)
   }, [data, activeTab])
 
   function jumpToMonth(m: number) {
@@ -429,14 +426,15 @@ function HorasAnual({
   horasYear: BPHorasYearRow
   onMonthClick?: (mes: number) => void
 }) {
-  // Only include months where this BP has at least one asignacion.
+  // Only include months with activity (assigned hours or contracted
+  // capacity) — an idle contracted month shows as a full-height idle bar.
   const activeMonths = useMemo(
-    () => MONTHS.filter((_m, i) => horasYear.byMonth[i].horasAsignadas > 0),
+    () => MONTHS.filter((_m, i) => horasYear.byMonth[i].tieneActividad),
     [horasYear]
   )
 
   if (activeMonths.length === 0) {
-    return <EmptyState message="Sin asignaciones cargadas en el año." />
+    return <EmptyState message="Sin asignaciones ni horas contratadas en el año." />
   }
 
   // One data point per active month: x = month label, y = % ocupación.
@@ -730,10 +728,10 @@ function RentabilidadAnual({
   rentaYear: BPRentabilidadYearRow
   onMonthClick?: (mes: number) => void
 }) {
-  // Only include months where this BP has at least one asignacion.
+  // Only include months with activity (assigned hours or contracted
+  // capacity) — same rule as the annual aggregates.
   const activeMonths = useMemo(
-    () =>
-      MONTHS.filter((_m, i) => rentaYear.byMonth[i].byProject.length > 0),
+    () => MONTHS.filter((_m, i) => rentaYear.byMonth[i].tieneActividad),
     [rentaYear]
   )
 

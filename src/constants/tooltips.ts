@@ -6,7 +6,7 @@ export const TOOLTIPS = {
   ocupacionPromedio:
     'Promedio de ocupación de todos los BPs del mes. Se calcula dividiendo las horas asignadas sobre las horas contratadas de cada BP.',
   horasLibresTotales:
-    'Suma de horas sin asignar de todos los BPs. Son horas que la agencia está pagando pero que no están generando ingresos en ningún proyecto.',
+    'Suma de horas sin asignar de todos los BPs. Son horas que la agencia está pagando pero que no están generando ingresos en ningún proyecto. Un BP con horas contratadas y nada asignado cuenta con todas sus horas como libres.',
 
   // Dashboard BPs — Horas tab (tabla)
   horasLibresColumna:
@@ -40,7 +40,7 @@ export const TOOLTIPS = {
   difCubiertoOcupado:
     'Sueldo cubierto comercialmente menos sueldo ocupado. Positivo significa que lo cotizado supera el costo de las horas trabajadas.',
   sueldoOcioso:
-    'Sueldo menos sueldo ocupado. Es la parte del sueldo que no está respaldada por horas asignadas. Negativo significa que el BP está sobreasignado.',
+    'Sueldo menos sueldo ocupado. Es la parte del sueldo que no está respaldada por horas asignadas: si el BP tiene horas contratadas pero nada asignado, es el sueldo completo. Negativo significa que el BP está sobreasignado.',
   costoReal:
     'Costo efectivo del BP según las horas que tuvo asignadas. Se calcula como: horas asignadas × (sueldo ÷ horas contratadas). Refleja lo que realmente costó el BP ese mes, no su sueldo total.',
 

@@ -215,13 +215,14 @@ export function DashboardBrandPartners() {
     return true
   }
 
-  // Monthly view hides BPs that have no asignacion in the selected mes
-  // — the table mirrors what's actually scheduled. Annual view keeps
-  // every BP because the columns aggregate across the year.
+  // Monthly view hides BPs with no activity in the selected mes (no hours
+  // assigned AND no explicit `horas_contratadas` row) — the table mirrors
+  // what's scheduled plus contracted capacity sitting idle. Annual view
+  // keeps every BP because the columns aggregate across the year.
   const filteredHoras = useMemo(
     () =>
       allHorasRows.filter(
-        (r) => bpPasses(r.bp) && r.horasAsignadas > 0
+        (r) => bpPasses(r.bp) && r.tieneActividad
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allHorasRows, searchQuery, activoFilter]
@@ -229,7 +230,7 @@ export function DashboardBrandPartners() {
   const filteredRentabilidad = useMemo(
     () =>
       allRentabilidadRows.filter(
-        (r) => bpPasses(r.bp) && r.byProject.length > 0
+        (r) => bpPasses(r.bp) && r.tieneActividad
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allRentabilidadRows, searchQuery, activoFilter]
@@ -396,18 +397,16 @@ export function DashboardBrandPartners() {
         ? filteredHorasAnnual.length
         : filteredRentabilidadAnnual.length
 
-  // Annual mode: only render month columns that have at least one
-  // asignacion among the currently-visible BPs. Use the horas annual
-  // aggregate as the source of truth (horasAsignadas > 0 ⇔ has asignacion).
+  // Annual mode: only render month columns where at least one visible BP
+  // has activity (assigned hours OR contracted capacity). The horas annual
+  // aggregate carries `mesesActivos` — same rule the totals use.
   const activeMonths = useMemo(() => {
     if (view !== 'annual') return MONTHS
     // We need the union from BOTH annual aggregates' BP set; but they
     // share the same BPs (filtered identically), so horas suffices.
     const months = new Set<number>()
     for (const row of filteredHorasAnnual) {
-      row.byMonth.forEach((h, i) => {
-        if (h > 0) months.add(i + 1)
-      })
+      for (const m of row.mesesActivos) months.add(m)
     }
     return MONTHS.filter((m) => months.has(m))
   }, [view, filteredHorasAnnual])

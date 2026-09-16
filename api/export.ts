@@ -145,6 +145,10 @@ interface BpExportRow {
   id: string
   nombre: string
   activo: boolean
+  /** Assigned hours OR an explicit `horas_contratadas` row > 0 this mes.
+   *  Contracted-but-unassigned BPs are in with `asignadas: 0` and their
+   *  whole sueldo as `sueldo_ocioso`. */
+  tiene_actividad: boolean
   desde: string
   contratadas: number
   asignadas: number
@@ -280,19 +284,21 @@ export default async function handler(
           horasMensuales,
           capacidades
         )
-        // "BP con datos en el mes": worked hours, or a sueldo actually
-        // loaded for that mes. Inactive BPs are included — the `activo`
-        // flag tells the consumer which is which.
+        // "BP con datos en el mes": activity (worked hours OR contracted
+        // capacity on file), or a sueldo actually loaded for that mes.
+        // Inactive BPs are included — the `activo` flag tells the consumer
+        // which is which.
         const tieneSueldoRow = sueldos.some(
           (s) => s.mes === mes && same(s.bp_id, bp.id) && Number(s.sueldo) > 0
         )
-        if (horas.horasAsignadas <= 0 && !tieneSueldoRow) continue
+        if (!horas.tieneActividad && !tieneSueldoRow) continue
 
         const mesIngreso = getMesIngreso(bp)
         bpsOut.push({
           id: String(bp.id),
           nombre: bp.nombre,
           activo: bp.activo !== false,
+          tiene_actividad: horas.tieneActividad,
           desde: bp.fecha_ingreso
             ? bp.fecha_ingreso.slice(0, 7)
             : `${year}-${String(mesIngreso).padStart(2, '0')}`,
@@ -349,8 +355,11 @@ export default async function handler(
         }))
         .sort((a, b) => a.proyecto.localeCompare(b.proyecto))
 
-      // Totals mirror the dashboard KPIs: the Rentabilidad tab sums only
-      // BPs that actually have projects that month (filtro "Todos").
+      // Totals mirror the dashboard KPIs (filtro "Todos"): BPs with
+      // activity that month — projects assigned OR contracted capacity on
+      // file. `bps_con_asignaciones` keeps its original meaning (count of
+      // BPs with projects); `bps_con_actividad` is the base of the sums.
+      const conActividad = bpsOut.filter((b) => b.tiene_actividad)
       const conAsignaciones = bpsOut.filter((b) => b.asignaciones.length > 0)
       const sum = (rows: BpExportRow[], pick: (r: BpExportRow) => number) =>
         rows.reduce((s, r) => s + pick(r), 0)
@@ -360,17 +369,18 @@ export default async function handler(
         proyectos: proyectosOut,
         totales: {
           bps_con_asignaciones: conAsignaciones.length,
-          horas_contratadas: rH(sum(conAsignaciones, (r) => r.contratadas)),
-          horas_asignadas: rH(sum(conAsignaciones, (r) => r.asignadas)),
-          sueldo: r2(sum(conAsignaciones, (r) => r.sueldo)),
+          bps_con_actividad: conActividad.length,
+          horas_contratadas: rH(sum(conActividad, (r) => r.contratadas)),
+          horas_asignadas: rH(sum(conActividad, (r) => r.asignadas)),
+          sueldo: r2(sum(conActividad, (r) => r.sueldo)),
           ingreso_cotizado: r2(
-            sum(conAsignaciones, (r) => r.ingreso_cotizado)
+            sum(conActividad, (r) => r.ingreso_cotizado)
           ),
-          sueldo_ocupado: r2(sum(conAsignaciones, (r) => r.sueldo_ocupado)),
-          sueldo_ocioso: r2(sum(conAsignaciones, (r) => r.sueldo_ocioso)),
-          margen: r2(sum(conAsignaciones, (r) => r.margen)),
+          sueldo_ocupado: r2(sum(conActividad, (r) => r.sueldo_ocupado)),
+          sueldo_ocioso: r2(sum(conActividad, (r) => r.sueldo_ocioso)),
+          margen: r2(sum(conActividad, (r) => r.margen)),
           cobertura_salarial: r2(
-            sum(conAsignaciones, (r) => r.cobertura_salarial)
+            sum(conActividad, (r) => r.cobertura_salarial)
           ),
           proyectos_diferencia_horas: rH(
             proyectosOut.reduce((s, p) => s + p.diferencia_horas, 0)
@@ -392,6 +402,11 @@ export default async function handler(
           '`year` se acepta y se devuelve, pero no filtra — los datos son ' +
           'los cargados en la app.',
         moneda: 'ARS',
+        actividad:
+          'Un BP entra en el mes (y en `totales`) si tiene horas asignadas ' +
+          'o una fila de horas contratadas > 0. Sin asignaciones, sus horas ' +
+          'contratadas son ociosas y su sueldo completo es `sueldo_ocioso`. ' +
+          'Ver `tiene_actividad` por BP.',
         fuente: 'bp-manager · mismas fórmulas que la UI (src/lib/calculations.ts)',
       },
       months,

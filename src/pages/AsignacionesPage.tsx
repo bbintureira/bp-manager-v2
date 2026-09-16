@@ -41,10 +41,9 @@ import { StatusBadge } from '@/components/ui/status-badge'
 import { formatCurrency, formatHours, formatNumber, formatPercent } from '@/lib/format'
 import {
   HOURS_PER_MONTH,
+  bpTieneActividad,
   capacidadBPForMonth,
   type CapacidadMensual,
-  getMesEgreso,
-  getMesIngreso,
   summarizeAllProjectsRentabilidad,
   summarizeBPsAnnual,
   summarizeProjectsAnnual,
@@ -89,20 +88,14 @@ function annualHoursForBP(
   capacidades: CapacidadMensual[] = []
 ): number {
   if (!bp) return HOURS_PER_MONTH * 12
-  const mesIngreso = getMesIngreso(bp)
-  const mesEgreso = getMesEgreso(bp, sueldos)
-  const monthsWithAsig = new Set<number>()
-  for (const a of asignaciones) {
-    if (String(a.bp_id) !== String(bp.id)) continue
-    const m = Number(a.mes)
-    if (!Number.isFinite(m) || m < mesIngreso || m > mesEgreso) continue
-    if (Number(a.horas) <= 0) continue
-    monthsWithAsig.add(m)
-  }
-  // Capacity is per-month now, so sum it over the active months instead of
-  // multiplying a single scalar by their count.
+  // Capacity is per-month now, so sum it over the months with activity
+  // (assigned hours OR an explicit `horas_contratadas` row — same rule as
+  // the dashboard aggregates) instead of multiplying a scalar by a count.
   let total = 0
-  for (const m of monthsWithAsig) total += capacidadBPForMonth(bp, capacidades, m)
+  for (let m = 1; m <= 12; m++) {
+    if (!bpTieneActividad(bp, asignaciones, capacidades, m, sueldos)) continue
+    total += capacidadBPForMonth(bp, capacidades, m)
+  }
   return total
 }
 
@@ -308,7 +301,7 @@ export function AsignacionesPage() {
       setAllRows(rows)
 
       // Same datasource, pivoted by BP.
-      const bpRows = summarizeBPsAnnual(bps, asignaciones, sueldos)
+      const bpRows = summarizeBPsAnnual(bps, asignaciones, sueldos, capacidades)
         .filter((b) => b.totalHoras > 0)
       bpRows.sort((a, b) => b.totalHoras - a.totalHoras)
       setAllBpRows(bpRows)
